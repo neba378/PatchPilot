@@ -1,0 +1,18 @@
+{
+  "name": "demo-checkout-app",
+  "version": "1.0.0",
+  "description": "Sample application with realistic checkout null-safety bug for PatchPilot demonstration",
+  "main": "src/paymentController.ts",
+  "scripts": {
+    "test": "vitest run",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}

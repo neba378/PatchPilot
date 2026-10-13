@@ -1,0 +1,68 @@
+{
+  "sentryError": {
+    "event_id": "fc99281a8b12",
+    "project": { "slug": "checkout-service" },
+    "release": "checkout-service@a7b31e9",
+    "datetime": "2026-10-14T00:15:00.000Z",
+    "title": "TypeError: Cannot read properties of undefined (reading 'billingDetails')",
+    "metadata": {
+      "type": "TypeError",
+      "value": "Cannot read properties of undefined (reading 'billingDetails')"
+    },
+    "entries": [
+      {
+        "type": "exception",
+        "data": {
+          "values": [
+            {
+              "type": "TypeError",
+              "value": "Cannot read properties of undefined (reading 'billingDetails')",
+              "stacktrace": {
+                "frames": [
+                  {
+                    "filename": "src/controllers/paymentController.ts",
+                    "abs_path": "/app/src/controllers/paymentController.ts",
+                    "lineno": 10,
+                    "colno": 33,
+                    "function": "handleCheckout",
+                    "in_app": true
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "gitHubActionsFailure": {
+    "workflow_run": {
+      "id": 994128,
+      "name": "CI Test Suite",
+      "head_branch": "main",
+      "head_sha": "a7b31e9",
+      "conclusion": "failure",
+      "display_title": "feat: add customer metadata payload parsing in checkout",
+      "html_url": "https://github.com/nebiyu-org/checkout-api-service/actions/runs/994128",
+      "head_commit": {
+        "id": "a7b31e9c20491823901b",
+        "message": "feat: add customer metadata payload parsing in checkout",
+        "author": { "name": "Nebiyu", "email": "dev@team.io" }
+      }
+    },
+    "repository": {
+      "full_name": "nebiyu-org/checkout-api-service"
+    },
+    "logExcerpt": "FAIL src/controllers/__tests__/checkout.test.ts\nTypeError: Cannot read properties of undefined (reading 'billingDetails')\n  at handleCheckout (src/controllers/paymentController.ts:10:33)"
+  },
+  "genericWebhook": {
+    "title": "Database connection pool exhausted",
+    "type": "PoolTimeoutError",
+    "message": "Timeout: could not acquire client from pool within 5000ms",
+    "environment": "production",
+    "file": "src/db/pool.ts",
+    "line": 42,
+    "function": "acquireClient",
+    "commitSha": "f8921a4"
+  }
+}

@@ -1,0 +1,49 @@
+// src/app/api/webhooks/generic/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { logSourceRegistry } from '@/adapters/logsources/registry';
+import { correlateAndIngestSignal } from '@/core/correlation';
+import { db } from '@/db';
+import { jobs } from '@/db/schema';
+import { logger } from '@/core/logger';
+
+export async function POST(req: NextRequest) {
+  try {
+    const rawBody = await req.text();
+    const headers: Record<string, string> = {};
+    req.headers.forEach((value, key) => { headers[key] = value; });
+
+    const adapter = logSourceRegistry.get('generic_webhook');
+    if (!adapter) {
+      return NextResponse.json({ error: 'Generic webhook adapter missing' }, { status: 500 });
+    }
+
+    const secret = process.env.GENERIC_WEBHOOK_SECRET || 'generic-webhook-secret-token';
+    const isValid = adapter.verify({ headers, rawBody }, secret);
+    if (!isValid) {
+      return NextResponse.json({ error: 'Invalid webhook signature' }, { status: 401 });
+    }
+
+    const payload = JSON.parse(rawBody || '{}');
+    const parsedInputs = adapter.parse(payload, 'proj_main');
+
+    for (const input of parsedInputs) {
+      const { incident, isNew } = await correlateAndIngestSignal(input);
+
+      if (isNew && incident.status !== 'abstained') {
+        await db.insert(jobs).values({
+          id: `JOB-${Date.now().toString(36)}`,
+          type: 'investigate',
+          payload: JSON.stringify({ incidentId: incident.id }),
+          status: 'queued',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+    }
+
+    return NextResponse.json({ success: true, processed: parsedInputs.length });
+  } catch (err: any) {
+    logger.error({ error: err.message }, '[Webhook:Generic] Ingest error');
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
