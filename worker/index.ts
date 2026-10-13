@@ -8,6 +8,7 @@ import { runInvestigation } from '../src/agents/investigator';
 import { runVerifierPass } from '../src/agents/verifier';
 import { telegramAdapter } from '../src/adapters/channels/telegram';
 import { executeSandboxFix } from '../src/core/sandboxFixPipeline';
+import { telegramPoller } from '../src/adapters/channels/telegramPoller';
 
 async function processJob(job: any): Promise<void> {
   const payload = JSON.parse(job.payload);
@@ -63,6 +64,11 @@ async function processJob(job: any): Promise<void> {
 
 export async function runWorkerLoop(singleRun: boolean = false): Promise<void> {
   logger.info('[Worker] Background queue worker active');
+
+  // Start Telegram bot long-polling daemon if bot token is provided
+  telegramPoller.start().catch((err: any) => {
+    logger.warn({ error: err.message }, '[Worker] Telegram poller notice');
+  });
 
   do {
     try {

@@ -49,7 +49,8 @@ export async function executeSandboxFix(
 
   const repo = incident.repo || 'nebiyu-org/checkout-api-service';
   const commitRef = incident.commitSha || 'main';
-  const provider = sandboxRegistry.get('fake');
+  const providerType = process.env.SANDBOX_PROVIDER || 'local-docker';
+  const provider = sandboxRegistry.get(providerType);
 
   // 2. Fetch repo snapshot (no GitHub token ever enters sandbox!)
   const files = await gitHubAdapter.getSnapshot(repo, commitRef);

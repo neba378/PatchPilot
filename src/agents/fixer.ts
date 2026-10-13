@@ -1,7 +1,7 @@
 // src/agents/fixer.ts
 import { InvestigationOutput, FixOutput, FixOutputSchema } from '../core/schemas';
 import { logger } from '../core/logger';
-import { google } from '@ai-sdk/google';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateObject } from 'ai';
 import { geminiRateLimiter } from './rateLimiter';
 
@@ -10,16 +10,21 @@ export async function generateFixEdits(
   fileContent: string,
   targetFilePath: string
 ): Promise<FixOutput> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
 
-  if (apiKey && apiKey !== 'mock' && apiKey.length > 10) {
+  if (apiKey && apiKey.trim() !== '') {
     const allowed = await geminiRateLimiter.acquire();
-    if (allowed) {
-      try {
-        const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-        logger.info({ model: modelName }, '[FixerAgent] Generating fix via Gemini LLM');
+    if (!allowed) {
+      throw new Error('Gemini API rate limit reached (10 RPM / 250 RPD limit).');
+    }
 
-        const prompt = `
+    const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    logger.info({ model: modelName, file: targetFilePath }, '[FixerAgent] Calling real Google Gemini API to synthesize patch');
+
+    const google = createGoogleGenerativeAI({ apiKey });
+    const model = google(modelName);
+
+    const prompt = `
 You are PatchPilot, an expert Autonomous Code Repair Engineer.
 Based on the verified investigation below, synthesize a MINIMAL, SAFE, NON-BREAKING patch.
 
@@ -32,73 +37,29 @@ STRICT CONSTRAINTS:
 VERIFIED ROOT CAUSE:
 ${investigation.rootCauses.join('\n')}
 
+LEADING HYPOTHESIS:
+${investigation.hypotheses.find(h => h.status === 'leading')?.statement || 'Code Bug'}
+
 TARGET FILE (${targetFilePath}):
+\`\`\`
 ${fileContent}
+\`\`\`
 `;
 
-        const res = await generateObject({
-          model: google(modelName),
-          schema: FixOutputSchema,
-          prompt
-        });
+    try {
+      const res = await generateObject({
+        model,
+        schema: FixOutputSchema,
+        prompt
+      });
 
-        return res.object;
-      } catch (err: any) {
-        logger.warn({ error: err.message }, '[FixerAgent] Gemini API call failed, falling back to deterministic synthesizer');
-      }
+      logger.info({ explanation: res.object.explanation }, '[FixerAgent] Real Gemini patch synthesis complete');
+      return res.object;
+    } catch (err: any) {
+      logger.error({ error: err.message }, '[FixerAgent] Gemini API patch synthesis failed');
+      throw new Error(`Google Gemini API patch synthesis failed: ${err.message}`);
     }
   }
 
-  // Deterministic fix synthesizer
-  logger.info('[FixerAgent] Generating deterministic safe fix edits');
-
-  if (fileContent.includes('const billingZip = metadata.billingDetails.postalCode;')) {
-    return {
-      edits: [
-        {
-          path: targetFilePath,
-          search: `    const { amount, currency, customerId, metadata } = req.body;
-    
-    // Buggy: metadata is assumed to always be an object, throws TypeError when customer sends null
-    const billingZip = metadata.billingDetails.postalCode;`,
-          replace: `    const { amount, currency, customerId, metadata = {} } = req.body;
-    
-    // PatchPilot Safe Guard: Optional chaining and default object prevent 500 TypeError
-    const billingZip = metadata?.billingDetails?.postalCode || null;`
-        }
-      ],
-      explanation: "Added default parameter fallback `metadata = {}` and safe optional chaining `metadata?.billingDetails?.postalCode || null` to prevent runtime TypeErrors when client sends missing or null metadata.",
-      regressionTestPath: "src/controllers/__tests__/regression.test.ts",
-      regressionTestCode: `import { handleCheckout } from '../paymentController';
-
-describe('Regression Test: Null/Missing Metadata Safety', () => {
-  it('should not throw TypeError when request metadata is missing or null', async () => {
-    const req = {
-      body: {
-        amount: 2500,
-        currency: 'usd',
-        customerId: 'cus_9941'
-        // metadata is missing
-      }
-    };
-    const res = { status: () => ({ json: (d: any) => d }) };
-    await expect(handleCheckout(req, res)).resolves.not.toThrow();
-  });
-});`
-    };
-  }
-
-  // Generic fallback edit
-  return {
-    edits: [
-      {
-        path: targetFilePath,
-        search: `// Buggy`,
-        replace: `// PatchPilot Fix Applied`
-      }
-    ],
-    explanation: "Applied null safety guard check.",
-    regressionTestPath: "src/__tests__/regression.test.ts",
-    regressionTestCode: `describe('Regression', () => { it('passes', () => expect(true).toBe(true)); });`
-  };
+  throw new Error('GEMINI_API_KEY is not configured in .env. Please provide your Google AI Studio Gemini API key.');
 }
