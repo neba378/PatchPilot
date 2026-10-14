@@ -167,5 +167,12 @@ export async function correlateAndIngestSignal(input: IngestIncidentInput): Prom
   await db.insert(incidents).values(newIncident);
   logger.info({ incidentId: newIncidentId, category: triage.category, status: newIncident.status }, '[Correlation] Created new incident');
 
+  try {
+    const { telegramAdapter } = await import('../adapters/channels/telegram');
+    await telegramAdapter.sendAlert(newIncident as any);
+  } catch (tgErr: any) {
+    logger.warn({ error: tgErr.message }, '[Correlation] Failed to dispatch Telegram notification');
+  }
+
   return { incident: newIncident, isNew: true };
 }

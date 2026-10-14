@@ -11,9 +11,15 @@ import { logger } from '@/core/logger';
 export const incidentsRouter = Router();
 
 // GET /api/incidents - List all incidents
-incidentsRouter.get('/', async (_req: Request, res: Response) => {
+incidentsRouter.get('/', async (req: Request, res: Response) => {
   try {
-    const list = await db.select().from(incidents).orderBy(desc(incidents.detectedAt));
+    const projectId = req.query.projectId as string | undefined;
+
+    const query = db.select().from(incidents);
+    const list = projectId
+      ? await query.where(eq(incidents.projectId, projectId)).orderBy(desc(incidents.detectedAt))
+      : await query.orderBy(desc(incidents.detectedAt));
+
     return res.json({ incidents: list });
   } catch (err: any) {
     logger.error({ error: err.message }, '[Incidents] List failed');

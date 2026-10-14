@@ -1,12 +1,20 @@
-// backend/src/routes/webhooks.ts
 import { Router, Request, Response } from 'express';
 import { logSourceRegistry } from '@/adapters/logsources/registry';
 import { correlateAndIngestSignal } from '@/core/correlation';
 import { db } from '@/db';
-import { jobs } from '@/db/schema';
+import { jobs, projects } from '@/db/schema';
 import { logger } from '@/core/logger';
 
 export const webhooksRouter = Router();
+
+async function resolveTargetProject(queryProj?: string): Promise<{ id: string; repo?: string }> {
+  const dbProjects = await db.select().from(projects);
+  const activeProject = (queryProj ? dbProjects.find(p => p.id === queryProj) : null) || dbProjects.find(p => p.repoName === 'test') || dbProjects[0];
+  return {
+    id: activeProject?.id || 'proj_main',
+    repo: activeProject ? `${activeProject.repoOwner}/${activeProject.repoName}` : undefined
+  };
+}
 
 function getRawBodyAndHeaders(req: Request): { rawBody: string; headers: Record<string, string> } {
   let rawBody = req.rawBody;
@@ -34,7 +42,8 @@ function getRawBodyAndHeaders(req: Request): { rawBody: string; headers: Record<
 webhooksRouter.post('/generic', async (req: Request, res: Response) => {
   try {
     const { rawBody, headers } = getRawBodyAndHeaders(req);
-    const projectId = (req.query.projectId as string) || 'proj_main';
+    const queryProj = req.query.projectId as string | undefined;
+    const { id: targetProjectId, repo } = await resolveTargetProject(queryProj);
 
     const adapter = logSourceRegistry.get('generic_webhook');
     if (!adapter) {
@@ -48,9 +57,12 @@ webhooksRouter.post('/generic', async (req: Request, res: Response) => {
     }
 
     const payload = JSON.parse(rawBody || '{}');
-    const parsedInputs = adapter.parse(payload, projectId);
+    const parsedInputs = adapter.parse(payload, targetProjectId);
 
     for (const input of parsedInputs) {
+      if (!input.repo && repo) {
+        input.repo = repo;
+      }
       const { incident, isNew } = await correlateAndIngestSignal(input);
 
       if (isNew && incident.status !== 'abstained') {
@@ -76,7 +88,8 @@ webhooksRouter.post('/generic', async (req: Request, res: Response) => {
 webhooksRouter.post('/github-actions', async (req: Request, res: Response) => {
   try {
     const { rawBody, headers } = getRawBodyAndHeaders(req);
-    const projectId = (req.query.projectId as string) || 'proj_main';
+    const queryProj = req.query.projectId as string | undefined;
+    const { id: targetProjectId, repo } = await resolveTargetProject(queryProj);
 
     const adapter = logSourceRegistry.get('github_actions');
     if (!adapter) {
@@ -90,9 +103,12 @@ webhooksRouter.post('/github-actions', async (req: Request, res: Response) => {
     }
 
     const payload = JSON.parse(rawBody || '{}');
-    const parsedInputs = adapter.parse(payload, projectId);
+    const parsedInputs = adapter.parse(payload, targetProjectId);
 
     for (const input of parsedInputs) {
+      if (!input.repo && repo) {
+        input.repo = repo;
+      }
       const { incident, isNew } = await correlateAndIngestSignal(input);
 
       if (isNew && incident.status !== 'abstained') {
@@ -118,7 +134,8 @@ webhooksRouter.post('/github-actions', async (req: Request, res: Response) => {
 webhooksRouter.post('/sentry', async (req: Request, res: Response) => {
   try {
     const { rawBody, headers } = getRawBodyAndHeaders(req);
-    const projectId = (req.query.projectId as string) || 'proj_main';
+    const queryProj = req.query.projectId as string | undefined;
+    const { id: targetProjectId, repo } = await resolveTargetProject(queryProj);
 
     const adapter = logSourceRegistry.get('sentry');
     if (!adapter) {
@@ -132,9 +149,12 @@ webhooksRouter.post('/sentry', async (req: Request, res: Response) => {
     }
 
     const payload = JSON.parse(rawBody || '{}');
-    const parsedInputs = adapter.parse(payload, projectId);
+    const parsedInputs = adapter.parse(payload, targetProjectId);
 
     for (const input of parsedInputs) {
+      if (!input.repo && repo) {
+        input.repo = repo;
+      }
       const { incident, isNew } = await correlateAndIngestSignal(input);
 
       if (isNew && incident.status !== 'abstained') {

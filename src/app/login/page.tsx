@@ -1,13 +1,15 @@
 'use client';
 
-// src/app/login/page.tsx
 import React, { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Shield, Lock, AlertCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 
 function GoogleIcon() {
   return (
-    <svg className="w-5 h-5 mr-3 shrink-0" viewBox="0 0 24 24">
+    <svg className="size-4 mr-2 shrink-0" viewBox="0 0 24 24">
       <path
         fill="#4285F4"
         d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -36,13 +38,13 @@ function LoginContent() {
   const getErrorMessage = (err: string | null) => {
     switch (err) {
       case 'access_denied':
-        return 'Access was denied. Please approve Google permissions to continue.';
+        return 'Access denied. Please approve Google permissions to continue.';
       case 'invalid_state':
-        return 'Security verification failed or session timed out. Please try signing in again.';
+        return 'Session expired. Please sign in again.';
       case 'missing_code_or_state':
-        return 'Missing OAuth authorization parameters. Please try again.';
+        return 'Invalid OAuth response parameters.';
       case 'auth_failed':
-        return 'Failed to verify Google identity. Please ensure your account has access and retry.';
+        return 'Failed to verify account identity.';
       default:
         return err ? `Authentication error: ${err}` : null;
     }
@@ -50,86 +52,84 @@ function LoginContent() {
 
   const errorMessage = getErrorMessage(error);
   const loginUrl = `/api/auth/google/login?returnUrl=${encodeURIComponent(returnUrl)}`;
+  const devLoginUrl = `/api/auth/dev-login?returnUrl=${encodeURIComponent(returnUrl)}`;
 
   return (
-    <div className="min-h-[75vh] flex flex-col items-center justify-center px-4">
-      {/* Background Glow */}
-      <div className="absolute inset-0 max-w-4xl mx-auto h-[480px] bg-gradient-to-b from-blue-600/10 via-cyan-500/5 to-transparent blur-3xl pointer-events-none -z-10" />
-
-      <div className="w-full max-w-md">
-        {/* Card Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-cyan-500 text-white shadow-xl shadow-blue-500/25 mb-4 border border-blue-400/30">
-            <Shield className="w-8 h-8" />
+    <div className="min-h-[70vh] flex flex-col items-center justify-center px-4">
+      <div className="w-full max-w-sm">
+        {/* Brand Header */}
+        <div className="text-center mb-6">
+          <div className="inline-flex items-center justify-center size-12 rounded-xl bg-primary/10 text-primary border border-primary/20 mb-3 shadow-inner">
+            <Shield className="size-6" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center justify-center gap-2">
+          <h1 className="text-xl font-bold tracking-tight text-foreground flex items-center justify-center gap-2">
             PatchPilot
-            <span className="text-xs uppercase font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
-              DevOps SRE
-            </span>
+            <Badge variant="outline" className="text-[10px] font-mono py-0 px-1.5 border-primary/30 text-primary">
+              SRE
+            </Badge>
           </h1>
-          <p className="text-sm text-slate-400 mt-2">
-            Autonomous Incident Remediation & Production SRE Platform
+          <p className="text-xs text-muted-foreground mt-1">
+            Autonomous incident remediation platform
           </p>
         </div>
 
-        {/* Error Banner */}
+        {/* Error Alert */}
         {errorMessage && (
-          <div className="mb-6 p-4 rounded-xl bg-red-950/40 border border-red-500/30 text-red-300 text-xs flex items-start gap-3 backdrop-blur animate-fade-in">
-            <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-            <div className="leading-relaxed">
-              <span className="font-semibold block text-red-200">Authentication Failed</span>
-              {errorMessage}
-            </div>
+          <div className="mb-4 p-3 rounded-lg bg-destructive/15 border border-destructive/30 text-destructive text-xs flex items-center gap-2.5">
+            <AlertCircle className="size-4 shrink-0" />
+            <span>{errorMessage}</span>
           </div>
         )}
 
-        {/* Login Box */}
-        <div className="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur shadow-2xl">
-          <div className="mb-6">
-            <h2 className="text-base font-semibold text-white">Sign In to Dashboard</h2>
-            <p className="text-xs text-slate-400 mt-1">
-              Authenticate with your authorized Google Workspace or developer account to manage incidents and remediation policies.
-            </p>
-          </div>
+        {/* Login Card */}
+        <Card className="border-border/70 bg-card/60 backdrop-blur shadow-xl">
+          <CardHeader className="p-5 pb-3">
+            <CardTitle className="text-base font-semibold text-foreground">Sign In</CardTitle>
+            <CardDescription className="text-xs text-muted-foreground">
+              Select your authentication method to continue.
+            </CardDescription>
+          </CardHeader>
 
-          <a
-            href={loginUrl}
-            className="w-full flex items-center justify-center py-3.5 px-4 rounded-xl font-medium text-sm text-slate-100 bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-slate-600 shadow-md hover:shadow-lg transition-all group mb-3"
-          >
-            <GoogleIcon />
-            <span>Continue with Google</span>
-            <ArrowRight className="w-4 h-4 ml-auto text-slate-400 group-hover:text-white group-hover:translate-x-0.5 transition-all" />
-          </a>
+          <CardContent className="p-5 pt-1 space-y-3">
+            <Button
+              asChild
+              className="w-full font-medium text-xs h-10 shadow-sm"
+            >
+              <a href={loginUrl}>
+                <GoogleIcon />
+                <span>Continue with Google</span>
+                <ArrowRight className="size-3.5 ml-auto opacity-70" />
+              </a>
+            </Button>
 
-          <a
-            href={`/api/auth/dev-login?returnUrl=${encodeURIComponent(returnUrl)}`}
-            className="w-full flex items-center justify-center py-2.5 px-4 rounded-xl font-medium text-xs text-slate-300 hover:text-white bg-slate-900 hover:bg-slate-800/80 border border-slate-800 hover:border-slate-700 transition-all text-center"
-          >
-            <span>Continue as On-Call Operator (Demo Access)</span>
-          </a>
+            <Button
+              asChild
+              variant="outline"
+              className="w-full font-medium text-xs h-9 border-border/70 hover:bg-muted/30"
+            >
+              <a href={devLoginUrl}>
+                <span>On-Call Operator Access (Demo)</span>
+              </a>
+            </Button>
+          </CardContent>
 
-          {/* Security Features */}
-          <div className="mt-8 pt-6 border-t border-slate-800/80 space-y-2.5">
-            <div className="flex items-center gap-2 text-[11px] text-slate-400">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span>OAuth 2.0 PKCE & Encrypted Session State</span>
-            </div>
-            <div className="flex items-center gap-2 text-[11px] text-slate-400">
-              <Lock className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-              <span>AES-256-GCM Session Protection at Rest</span>
-            </div>
-            <div className="flex items-center gap-2 text-[11px] text-slate-400">
-              <Shield className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-              <span>Strict Role-Based Access for Production Remediations</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer info */}
-        <p className="text-center text-xs text-slate-500 mt-6">
-          Protected by PatchPilot Security Policy Engine
-        </p>
+          <CardFooter className="p-5 pt-2 border-t border-border/50 flex flex-wrap gap-2 justify-center text-[10px] text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <CheckCircle2 className="size-3 text-emerald-400" />
+              OAuth 2.0 PKCE
+            </span>
+            <span>•</span>
+            <span className="flex items-center gap-1">
+              <Lock className="size-3 text-cyan-400" />
+              AES-256 GCM
+            </span>
+            <span>•</span>
+            <span className="flex items-center gap-1">
+              <Shield className="size-3 text-primary" />
+              Policy Enforced
+            </span>
+          </CardFooter>
+        </Card>
       </div>
     </div>
   );
@@ -137,7 +137,7 @@ function LoginContent() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="text-center text-slate-400 py-20">Loading authentication...</div>}>
+    <Suspense fallback={<div className="text-center text-muted-foreground text-xs py-20">Loading...</div>}>
       <LoginContent />
     </Suspense>
   );

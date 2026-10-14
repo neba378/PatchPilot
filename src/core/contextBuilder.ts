@@ -18,18 +18,26 @@ export interface InvestigationContext {
 }
 
 export async function buildInvestigationContext(incident: Incident): Promise<InvestigationContext> {
-  const repo = incident.repo || 'nebiyu-org/checkout-api-service';
+  const repo = incident.repo || process.env.TARGET_GITHUB_REPO || 'neba378/test';
   const commitRef = incident.commitSha || 'main';
   const repoHost = await getGitHubAdapterForProject(incident.projectId);
 
   // 1. Fetch in-app frame files with ~40 lines window
   const fileExcerpts: { path: string; lines: string; startLine: number; endLine: number }[] = [];
-  const frames = incident.stackFrames || [];
-  const inAppFrames = frames.filter(f => f.inApp);
+  const rawFrames = incident.stackFrames;
+  let frames: any[] = [];
+  try {
+    frames = Array.isArray(rawFrames)
+      ? rawFrames
+      : (typeof rawFrames === 'string' ? JSON.parse(rawFrames || '[]') : []);
+  } catch {
+    frames = [];
+  }
+  const inAppFrames = frames.filter((f: any) => f && f.inApp);
 
-  const targetFiles = Array.from(new Set(inAppFrames.map(f => f.file))).slice(0, 3);
+  const targetFiles = Array.from(new Set(inAppFrames.map((f: any) => f.file))).slice(0, 3);
   if (targetFiles.length === 0) {
-    targetFiles.push('src/controllers/paymentController.ts');
+    targetFiles.push('src/paymentController.ts');
   }
 
   for (const filePath of targetFiles) {

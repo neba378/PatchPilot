@@ -2,7 +2,8 @@
 import { Incident } from '../../core/schemas';
 import { logger } from '../../core/logger';
 import { db } from '../../db';
-import { messages } from '../../db/schema';
+import { messages, connections } from '../../db/schema';
+import { eq } from 'drizzle-orm';
 
 export interface TelegramButton {
   text: string;
@@ -82,8 +83,30 @@ Tap *Accept & Patch* to reproduce in sandbox, synthesize fix, and generate draft
    * If TELEGRAM_BOT_TOKEN is not configured, logs cleanly and records in database for UI simulation.
    */
   public async sendAlert(incident: Incident, chatId?: string, appUrl?: string): Promise<{ success: boolean; simulated: boolean }> {
-    const targetChatId = chatId || this.defaultChatId || process.env.TELEGRAM_CHAT_ID;
-    const { text, inlineKeyboard } = this.formatAlertCard(incident, appUrl || process.env.APP_URL);
+    let botToken = this.botToken || process.env.TELEGRAM_BOT_TOKEN;
+    let targetChatId = chatId || this.defaultChatId || process.env.TELEGRAM_CHAT_ID;
+
+    // Fallback: Check database connections table if not in environment
+    if (!botToken || !targetChatId) {
+      try {
+        const tgConn = await db.select().from(connections).where(eq(connections.type, 'telegram')).get();
+        if (tgConn) {
+          botToken = botToken || tgConn.encryptedSecret;
+          if (!targetChatId && tgConn.metadata) {
+            const meta = JSON.parse(tgConn.metadata);
+            targetChatId = meta.chatId;
+          }
+        }
+      } catch {}
+    }
+
+    const finalAppUrl = (appUrl && appUrl.startsWith('https://'))
+      ? appUrl
+      : (process.env.APP_URL && process.env.APP_URL.startsWith('https://'))
+        ? process.env.APP_URL
+        : 'https://5368-196-191-223-32.ngrok-free.app';
+
+    const { text, inlineKeyboard } = this.formatAlertCard(incident, finalAppUrl);
 
     // Save message to database messages table
     const messageRecordId = `MSG-${Date.now().toString(36)}`;
@@ -99,13 +122,13 @@ Tap *Accept & Patch* to reproduce in sandbox, synthesize fix, and generate draft
       });
     } catch {}
 
-    if (!this.botToken || !targetChatId) {
+    if (!botToken || !targetChatId) {
       logger.info({ incidentId: incident.id }, '[TelegramAdapter] TELEGRAM_BOT_TOKEN not configured. Simulated dispatch recorded in DB.');
       return { success: true, simulated: true };
     }
 
     try {
-      const endpoint = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
+      const endpoint = `https://api.telegram.org/bot${botToken}/sendMessage`;
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

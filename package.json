@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --turbo -p 3000",
+    "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
     "backend:dev": "tsx backend/src/server.ts",
@@ -25,7 +25,10 @@
     "db:migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.79",
+    "@ai-sdk/gateway": "^4.0.113",
     "@ai-sdk/google": "^1.1.20",
+    "@ai-sdk/openai": "^4.0.93",
     "@chat-adapter/state-memory": "^4.41.1",
     "@chat-adapter/telegram": "^4.41.1",
     "@octokit/rest": "^21.1.1",
