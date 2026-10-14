@@ -19,7 +19,12 @@ import {
   Search,
   Lock,
   GitBranch,
-  Boxes
+  Boxes,
+  AlertTriangle,
+  CheckCircle2,
+  ShieldCheck,
+  Key,
+  Settings2
 } from 'lucide-react';
 
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
@@ -54,13 +59,28 @@ export default function SetupWizardPage() {
   const [saving, setSaving] = useState(false);
   const [createdProject, setCreatedProject] = useState<any>(null);
 
-  // GitHub OAuth State
+  // GitHub OAuth & UI Connection State
   const [isGithubConnected, setIsGithubConnected] = useState(false);
   const [githubUser, setGithubUser] = useState<GitHubUser | null>(null);
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(false);
   const [selectedRepoFullName, setSelectedRepoFullName] = useState('');
   const [repoSearchQuery, setRepoSearchQuery] = useState('');
+
+  // UI Connection & Permission State
+  const [ghConnectMode, setGhConnectMode] = useState<'oauth' | 'token'>('oauth');
+  const [oauthClientId, setOauthClientId] = useState('');
+  const [oauthClientSecret, setOauthClientSecret] = useState('');
+  const [patToken, setPatToken] = useState('');
+  const [verifyingToken, setVerifyingToken] = useState(false);
+  const [savingOauth, setSavingOauth] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
+  const [permChecking, setPermChecking] = useState(false);
+  const [repoPermissions, setRepoPermissions] = useState<{ canRead: boolean; canWrite: boolean; defaultBranch?: string; error?: string } | null>(null);
+  const [canDraftPR, setCanDraftPR] = useState(true);
+  const [canRunSandbox, setCanRunSandbox] = useState(true);
+  const [canInvestigate, setCanInvestigate] = useState(true);
+  const [callbackCopied, setCallbackCopied] = useState(false);
 
   // Form State
   const [projectName, setProjectName] = useState('Checkout Payment Service');
@@ -143,6 +163,75 @@ export default function SetupWizardPage() {
     };
   }, [checkGitHubStatus, fetchRepos]);
 
+  const checkRepoPermissions = async (fullName: string) => {
+    setPermChecking(true);
+    setRepoPermissions(null);
+    try {
+      const res = await fetch('/api/auth/github/check-permissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo: fullName })
+      });
+      const data = await res.json();
+      setRepoPermissions(data);
+      if (data.canWrite) {
+        setCanDraftPR(true);
+      }
+    } catch (e: any) {
+      setRepoPermissions({ canRead: false, canWrite: false, error: e.message });
+    } finally {
+      setPermChecking(false);
+    }
+  };
+
+  const handleConnectToken = async () => {
+    if (!patToken.trim()) return;
+    setVerifyingToken(true);
+    setTokenError(null);
+    try {
+      const res = await fetch('/api/auth/github/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: patToken.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Failed to authenticate token with GitHub');
+      }
+      setIsGithubConnected(true);
+      setGithubUser(data.user);
+      fetchRepos();
+    } catch (err: any) {
+      setTokenError(err.message);
+    } finally {
+      setVerifyingToken(false);
+    }
+  };
+
+  const handleSaveAndConnectOAuth = async () => {
+    if (oauthClientId.trim() && oauthClientSecret.trim()) {
+      setSavingOauth(true);
+      try {
+        const res = await fetch('/api/auth/github/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clientId: oauthClientId.trim(), clientSecret: oauthClientSecret.trim() })
+        });
+        const data = await res.json();
+        if (data.authorizeUrl) {
+          window.open(data.authorizeUrl, '_blank');
+          return;
+        }
+      } catch (e: any) {
+        alert(`Failed to save OAuth configuration: ${e.message}`);
+      } finally {
+        setSavingOauth(false);
+      }
+    } else {
+      window.open('/api/auth/github/login', '_blank');
+    }
+  };
+
   const handleConnectGitHub = () => {
     window.open('/api/auth/github/login', '_blank');
   };
@@ -154,6 +243,7 @@ export default function SetupWizardPage() {
       setGithubUser(null);
       setRepos([]);
       setSelectedRepoFullName('');
+      setRepoPermissions(null);
     } catch (err: any) {
       alert(`Failed to disconnect: ${err.message}`);
     }
@@ -170,6 +260,7 @@ export default function SetupWizardPage() {
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
       .join(' ');
     setProjectName(formatted);
+    checkRepoPermissions(repo.fullName);
   };
 
   const handleCreateProject = async () => {
@@ -184,6 +275,7 @@ export default function SetupWizardPage() {
           repoName,
           defaultBranch,
           sandboxProvider,
+          canDraftPR,
           geminiApiKey,
           sentrySecret,
           telegramToken,
@@ -261,27 +353,151 @@ export default function SetupWizardPage() {
           </CardHeader>
 
           <CardContent className="p-5 pt-1 space-y-4 text-xs">
-            {/* GitHub OAuth Connection Card */}
+            {/* GitHub OAuth & Token UI Connection Card */}
             {!isGithubConnected ? (
-              <div className="p-4 rounded-xl border border-border/80 bg-muted/20 flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="space-y-1 text-center sm:text-left">
-                  <div className="flex items-center gap-2 justify-center sm:justify-start">
-                    <Github className="size-4 text-foreground" />
-                    <span className="font-semibold text-sm text-foreground">Connect with GitHub</span>
+              <div className="p-4 rounded-xl border border-border/80 bg-muted/20 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/50 pb-3">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <Github className="size-4 text-foreground" />
+                      <span className="font-semibold text-sm text-foreground">GitHub Integration</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Choose how you want to connect your GitHub account to authorize repository access.
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Sign in with your GitHub account to authorize repository access, code inspection, and DRAFT pull requests.
-                  </p>
+
+                  <div className="flex items-center bg-card/60 p-0.5 rounded-lg border border-border/60 self-start sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => setGhConnectMode('oauth')}
+                      className={`px-2.5 py-1 text-xs rounded-md font-medium transition-colors ${
+                        ghConnectMode === 'oauth' ? 'bg-primary text-primary-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      OAuth App
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGhConnectMode('token')}
+                      className={`px-2.5 py-1 text-xs rounded-md font-medium transition-colors ${
+                        ghConnectMode === 'token' ? 'bg-primary text-primary-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      Personal Token
+                    </button>
+                  </div>
                 </div>
 
-                <Button
-                  type="button"
-                  onClick={handleConnectGitHub}
-                  className="gap-2 shrink-0 font-semibold"
-                >
-                  <Github className="size-4" />
-                  Connect to GitHub
-                </Button>
+                {ghConnectMode === 'oauth' ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Connect via GitHub OAuth with the <code>repo</code> scope to automatically grant branch creation, commit pushing, and Draft PR permissions.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-foreground">Client ID (Optional)</label>
+                        <Input
+                          type="text"
+                          value={oauthClientId}
+                          onChange={(e) => setOauthClientId(e.target.value)}
+                          placeholder="Ov23li..."
+                          className="h-8 text-xs font-mono bg-background/50"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-foreground">Client Secret (Optional)</label>
+                        <Input
+                          type="password"
+                          value={oauthClientSecret}
+                          onChange={(e) => setOauthClientSecret(e.target.value)}
+                          placeholder="••••••••••••••••••••"
+                          className="h-8 text-xs font-mono bg-background/50"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 rounded-lg border border-border/50 bg-background/40 flex items-center justify-between text-[11px]">
+                      <div>
+                        <span className="text-muted-foreground block text-[10px]">Authorization Callback URL:</span>
+                        <code className="text-foreground font-mono text-[11px]">{webhookBaseUrl}/api/auth/github/callback</code>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => copyToClipboard(`${webhookBaseUrl}/api/auth/github/callback`, 'gh_cb')}
+                        className="h-7 text-xs gap-1"
+                      >
+                        {copiedUrl === 'gh_cb' ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
+                        Copy
+                      </Button>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <Button
+                        type="button"
+                        onClick={handleSaveAndConnectOAuth}
+                        disabled={savingOauth}
+                        className="gap-2 font-semibold text-xs h-8"
+                      >
+                        {savingOauth ? <RefreshCw className="size-3.5 animate-spin" /> : <Github className="size-3.5" />}
+                        {oauthClientId && oauthClientSecret ? 'Save & Connect OAuth' : 'Connect via GitHub'}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Enter a GitHub Personal Access Token (PAT) with write access to repositories and pull requests.
+                    </p>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-foreground">GitHub Access Token</label>
+                      <Input
+                        type="password"
+                        value={patToken}
+                        onChange={(e) => setPatToken(e.target.value)}
+                        placeholder="github_pat_... or ghp_..."
+                        className="h-8 text-xs font-mono bg-background/50"
+                      />
+                    </div>
+
+                    <div className="p-3 rounded-lg border border-border/50 bg-background/30 space-y-1.5 text-[11px]">
+                      <span className="font-semibold text-foreground block">Required Token Scopes for Automated Fixes:</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-muted-foreground">
+                        <div className="flex items-center gap-1.5">
+                          <CheckCircle2 className="size-3 text-emerald-400" />
+                          <span>Contents: <strong>Read & write</strong></span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <CheckCircle2 className="size-3 text-emerald-400" />
+                          <span>Pull requests: <strong>Read & write</strong></span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {tokenError && (
+                      <div className="p-2.5 rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-300 text-xs flex items-center gap-2">
+                        <AlertTriangle className="size-4 shrink-0 text-rose-400" />
+                        <span>{tokenError}</span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <Button
+                        type="button"
+                        onClick={handleConnectToken}
+                        disabled={verifyingToken || !patToken.trim()}
+                        className="gap-2 font-semibold text-xs h-8"
+                      >
+                        {verifyingToken ? <RefreshCw className="size-3.5 animate-spin" /> : <Key className="size-3.5" />}
+                        Verify & Connect Token
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 flex items-center justify-between gap-3">
@@ -411,6 +627,122 @@ export default function SetupWizardPage() {
                       No repositories found.
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* Selected Repo Capabilities & Permissions Checklist */}
+            {isGithubConnected && selectedRepoFullName && (
+              <div className="p-3.5 rounded-xl border border-border/80 bg-muted/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-xs text-foreground flex items-center gap-1.5">
+                    <ShieldCheck className="size-4 text-primary" />
+                    Project Capabilities & Permissions for {selectedRepoFullName}
+                  </span>
+                  {permChecking ? (
+                    <Badge variant="outline" className="text-[10px] text-muted-foreground gap-1 py-0 px-2 animate-pulse">
+                      <RefreshCw className="size-2.5 animate-spin" />
+                      Checking permissions...
+                    </Badge>
+                  ) : repoPermissions?.canWrite ? (
+                    <Badge variant="outline" className="text-[10px] text-emerald-400 bg-emerald-500/15 border-emerald-500/30 gap-1 py-0 px-2">
+                      <CheckCircle2 className="size-3 text-emerald-400" />
+                      Write & Draft PR Verified
+                    </Badge>
+                  ) : repoPermissions ? (
+                    <Badge variant="outline" className="text-[10px] text-amber-400 bg-amber-500/15 border-amber-500/30 gap-1 py-0 px-2">
+                      <AlertTriangle className="size-3 text-amber-400" />
+                      Read-Only Permission
+                    </Badge>
+                  ) : null}
+                </div>
+
+                {repoPermissions && !repoPermissions.canWrite && !permChecking && (
+                  <div className="p-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-300 text-[11px] flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="size-4 shrink-0 text-amber-400" />
+                      <span>
+                        Branch creation denied by GitHub for this repository. Automated fixes will run in <strong>Advisory Mode</strong> unless write permissions are granted.
+                      </span>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsGithubConnected(false)}
+                      className="h-6 text-[10px] border-amber-500/40 text-amber-300 shrink-0"
+                    >
+                      Update Connection
+                    </Button>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                  <div
+                    onClick={() => setCanDraftPR(!canDraftPR)}
+                    className={`p-2.5 rounded-lg border cursor-pointer transition-colors space-y-1 ${
+                      canDraftPR
+                        ? 'border-primary/60 bg-primary/10'
+                        : 'border-border/60 bg-background/30 hover:border-border'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-foreground">Draft Pull Requests</span>
+                      <input
+                        type="checkbox"
+                        checked={canDraftPR}
+                        onChange={() => {}}
+                        className="rounded border-border text-primary size-3.5"
+                      />
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-normal">
+                      Automatically push patch branches and open draft PRs with regression proof.
+                    </p>
+                  </div>
+
+                  <div
+                    onClick={() => setCanRunSandbox(!canRunSandbox)}
+                    className={`p-2.5 rounded-lg border cursor-pointer transition-colors space-y-1 ${
+                      canRunSandbox
+                        ? 'border-primary/60 bg-primary/10'
+                        : 'border-border/60 bg-background/30 hover:border-border'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-foreground">Sandbox Validation</span>
+                      <input
+                        type="checkbox"
+                        checked={canRunSandbox}
+                        onChange={() => {}}
+                        className="rounded border-border text-primary size-3.5"
+                      />
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-normal">
+                      Run isolated mutation and test suites in Docker before human review.
+                    </p>
+                  </div>
+
+                  <div
+                    onClick={() => setCanInvestigate(!canInvestigate)}
+                    className={`p-2.5 rounded-lg border cursor-pointer transition-colors space-y-1 ${
+                      canInvestigate
+                        ? 'border-primary/60 bg-primary/10'
+                        : 'border-border/60 bg-background/30 hover:border-border'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-foreground">Root Cause Analysis</span>
+                      <input
+                        type="checkbox"
+                        checked={canInvestigate}
+                        onChange={() => {}}
+                        className="rounded border-border text-primary size-3.5"
+                      />
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-normal">
+                      Hypothesis formulation and stack trace dissection via Vercel AI SDK.
+                    </p>
+                  </div>
                 </div>
               </div>
             )}

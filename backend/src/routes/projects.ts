@@ -94,10 +94,11 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
     });
 
     // 2. Initialize Policy
+    const autonomyLevel = body.canDraftPR === false ? 'suggest' : (body.autonomyLevel || 'draft_pr');
     await db.insert(policies).values({
       id: `POL-${projectId}`,
       projectId,
-      autonomyLevel: 'draft_pr',
+      autonomyLevel,
       protectedPaths: '["migrations/**", "infra/**", ".github/**", "security/**", ".env"]',
       maxChangedFiles: 3,
       maxChangedLines: 60,

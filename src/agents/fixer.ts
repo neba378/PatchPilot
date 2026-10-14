@@ -64,6 +64,7 @@ ${fileContent}
             replace: 'const billingZip = (metadata as any)?.billingDetails?.postalCode || null;'
           }
         ],
+        regressionTestPath: 'src/__tests__/patchpilot.regression.test.ts',
         regressionTestCode: `import { describe, it, expect } from 'vitest';
 import { handleCheckout } from '../paymentController';
 
