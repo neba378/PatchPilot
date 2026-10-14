@@ -11,12 +11,9 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   if (!isGoogleOAuthConfigured()) {
-    return NextResponse.json(
-      {
-        error: 'Google OAuth is not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.'
-      },
-      { status: 500 }
-    );
+    const loginUrl = new URL('/login', request.url);
+    loginUrl.searchParams.set('error', 'oauth_not_configured');
+    return NextResponse.redirect(loginUrl);
   }
 
   const { searchParams } = new URL(request.url);
