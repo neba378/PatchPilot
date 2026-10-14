@@ -1,6 +1,6 @@
 // src/core/contextBuilder.ts
 import { Incident } from './schemas';
-import { gitHubAdapter } from '../adapters/repohosts/github';
+import { gitHubAdapter, getGitHubAdapterForProject } from '../adapters/repohosts/github';
 import { scrubSecrets } from '../policy/scrubber';
 import { wrapUntrustedData } from '../policy/injectionGuards';
 import { db } from '../db';
@@ -20,6 +20,7 @@ export interface InvestigationContext {
 export async function buildInvestigationContext(incident: Incident): Promise<InvestigationContext> {
   const repo = incident.repo || 'nebiyu-org/checkout-api-service';
   const commitRef = incident.commitSha || 'main';
+  const repoHost = await getGitHubAdapterForProject(incident.projectId);
 
   // 1. Fetch in-app frame files with ~40 lines window
   const fileExcerpts: { path: string; lines: string; startLine: number; endLine: number }[] = [];
@@ -32,7 +33,7 @@ export async function buildInvestigationContext(incident: Incident): Promise<Inv
   }
 
   for (const filePath of targetFiles) {
-    const rawContent = await gitHubAdapter.getFile(repo, commitRef, filePath);
+    const rawContent = await repoHost.getFile(repo, commitRef, filePath);
     const lines = rawContent.split('\n');
 
     // Find target line from stack frame
@@ -51,11 +52,11 @@ export async function buildInvestigationContext(incident: Incident): Promise<Inv
   }
 
   // 2. Fetch suspect commit diff
-  const rawDiff = await gitHubAdapter.commitDiff(repo, commitRef, incident.commitSha || 'head');
+  const rawDiff = await repoHost.commitDiff(repo, commitRef, incident.commitSha || 'head');
   const suspectCommitDiff = scrubSecrets(rawDiff);
 
   // 3. Fetch recent commits touching files
-  const recentCommits = await gitHubAdapter.recentCommits(repo, commitRef, targetFiles);
+  const recentCommits = await repoHost.recentCommits(repo, commitRef, targetFiles);
 
   // 4. Scrub and wrap raw logs
   const scrubbedLogs = wrapUntrustedData(

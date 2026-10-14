@@ -45,9 +45,9 @@ const palettes: PaletteOption[] = [
   {
     id: 'obsidian',
     name: 'Obsidian & Electric Cobalt',
-    subtitle: 'High-Tech SRE Cockpit (Default)',
+    subtitle: 'High-Tech SRE Cockpit (Alternative)',
     description: 'Deep navy-obsidian canvas paired with electric cobalt and vibrant cyan accents. Calming dark mode with ultra-crisp telemetry contrast.',
-    badge: 'Recommended',
+    badge: 'Alternative Cockpit',
     bgHex: '#080D1A',
     cardHex: '#0D1527',
     primaryHex: '#3B82F6',
@@ -95,7 +95,7 @@ const palettes: PaletteOption[] = [
     name: 'Graphite & Safety Amber',
     subtitle: 'Industrial Reliability & Incident Command',
     description: 'Warm slate-graphite surfaces with safety amber and high-visibility status cues, emphasizing human-in-the-loop safety and governance.',
-    badge: 'Industrial SRE',
+    badge: 'Selected Canonical',
     bgHex: '#0F172A',
     cardHex: '#1E293B',
     primaryHex: '#F59E0B',
@@ -109,12 +109,16 @@ const palettes: PaletteOption[] = [
 ];
 
 export default function DesignSystemPage() {
-  const [activeTheme, setActiveTheme] = useState<string>('obsidian');
+  const [activeTheme, setActiveTheme] = useState<string>('graphite');
 
   useEffect(() => {
-    const saved = localStorage.getItem('patchpilot:theme') || 'obsidian';
+    const urlTheme = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('theme') : null;
+    const saved = urlTheme || (typeof window !== 'undefined' ? localStorage.getItem('patchpilot:theme') : null) || 'graphite';
     setActiveTheme(saved);
     document.documentElement.setAttribute('data-theme', saved);
+    if (urlTheme && typeof window !== 'undefined') {
+      localStorage.setItem('patchpilot:theme', urlTheme);
+    }
   }, []);
 
   const handleSelectTheme = (themeId: string) => {

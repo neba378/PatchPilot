@@ -34,11 +34,11 @@ const themes = [
 
 export function AppHeader() {
   const pathname = usePathname()
-  const [activeTheme, setActiveTheme] = React.useState('obsidian')
+  const [activeTheme, setActiveTheme] = React.useState('graphite')
 
   React.useEffect(() => {
     const urlTheme = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('theme') : null
-    const saved = urlTheme || (typeof window !== 'undefined' ? localStorage.getItem('patchpilot:theme') : null) || 'obsidian'
+    const saved = urlTheme || (typeof window !== 'undefined' ? localStorage.getItem('patchpilot:theme') : null) || 'graphite'
     setActiveTheme(saved)
     document.documentElement.setAttribute('data-theme', saved)
     if (urlTheme && typeof window !== 'undefined') {

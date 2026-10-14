@@ -1,7 +1,9 @@
-// src/adapters/repohosts/github.ts
 import { Octokit } from '@octokit/rest';
 import { RepoHostAdapter, CodeHit, CommitInfo, PullRequestInfo } from './types';
 import { logger } from '../../core/logger';
+import { db } from '../../db';
+import { connections } from '../../db/schema';
+import { eq, and } from 'drizzle-orm';
 
 export class GitHubAdapter implements RepoHostAdapter {
   id = 'github';
@@ -322,3 +324,20 @@ export class GitHubAdapter implements RepoHostAdapter {
 }
 
 export const gitHubAdapter = new GitHubAdapter();
+
+export async function getGitHubAdapterForProject(projectId?: string): Promise<GitHubAdapter> {
+  if (projectId) {
+    try {
+      const conn = await db.select().from(connections)
+        .where(and(eq(connections.projectId, projectId), eq(connections.type, 'github')))
+        .get();
+      if (conn?.encryptedSecret) {
+        return new GitHubAdapter(conn.encryptedSecret);
+      }
+    } catch (err: any) {
+      logger.warn({ error: err.message, projectId }, '[GitHubAdapter] Failed to lookup project GitHub connection, using default adapter');
+    }
+  }
+  return gitHubAdapter;
+}
+

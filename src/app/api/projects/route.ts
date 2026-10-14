@@ -1,9 +1,9 @@
-// src/app/api/projects/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { projects, connections, policies } from '@/db/schema';
 import { desc, eq } from 'drizzle-orm';
 import crypto from 'crypto';
+import { decodeSessionCookie, GITHUB_SESSION_COOKIE_NAME } from '@/core/githubOAuth';
 
 export async function GET() {
   try {
@@ -82,13 +82,22 @@ export async function POST(req: NextRequest) {
     // 3. Save Connections (encrypted secrets)
     const connList: any[] = [];
 
-    if (githubToken) {
+    const rawSessionCookie = req.cookies.get(GITHUB_SESSION_COOKIE_NAME)?.value;
+    const session = decodeSessionCookie(rawSessionCookie);
+    const effectiveGithubToken = githubToken || session?.token || (process.env.GITHUB_TOKEN !== 'mock' ? process.env.GITHUB_TOKEN : undefined);
+
+    if (effectiveGithubToken) {
       connList.push({
         id: `conn_gh_${Date.now().toString(36)}`,
         projectId,
         type: 'github',
-        encryptedSecret: githubToken, // Stored encrypted/secured
-        metadata: JSON.stringify({ repo: `${repoOwner}/${repoName}`, defaultBranch }),
+        encryptedSecret: effectiveGithubToken,
+        metadata: JSON.stringify({
+          repo: `${repoOwner}/${repoName}`,
+          defaultBranch,
+          connectedVia: session ? session.source : (githubToken ? 'token' : 'env'),
+          username: session?.user?.login || repoOwner
+        }),
         createdAt: now
       });
     }
