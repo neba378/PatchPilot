@@ -47,6 +47,8 @@ function LoginContent() {
         return 'Invalid OAuth response parameters.';
       case 'auth_failed':
         return 'Failed to verify account identity.';
+      case 'oauth_not_configured':
+        return 'Google OAuth credentials (GOOGLE_CLIENT_ID & GOOGLE_CLIENT_SECRET) are not set in .env. Use On-Call Operator Access below.';
       default:
         return err ? `Authentication error: ${err}` : null;
     }
