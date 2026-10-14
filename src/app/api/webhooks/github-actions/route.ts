@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { logSourceRegistry } from '@/adapters/logsources/registry';
 import { correlateAndIngestSignal } from '@/core/correlation';
 import { db } from '@/db';
-import { jobs } from '@/db/schema';
+import { jobs, projects } from '@/db/schema';
 import { logger } from '@/core/logger';
 
 export async function POST(req: NextRequest) {

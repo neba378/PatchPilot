@@ -124,7 +124,7 @@ export async function getLanguageModel(options: ModelResolutionOptions = {}): Pr
       }
       logger.info({ provider: 'openai', model: modelName }, '[AIProvider] Initializing OpenAI via AI SDK');
       const openai = createOpenAI({ apiKey });
-      return { model: openai(modelName), provider: 'openai', modelName };
+      return { model: openai(modelName) as any, provider: 'openai', modelName };
     }
 
     case 'anthropic': {
@@ -135,7 +135,7 @@ export async function getLanguageModel(options: ModelResolutionOptions = {}): Pr
       }
       logger.info({ provider: 'anthropic', model: modelName }, '[AIProvider] Initializing Anthropic via AI SDK');
       const anthropic = createAnthropic({ apiKey });
-      return { model: anthropic(modelName), provider: 'anthropic', modelName };
+      return { model: anthropic(modelName) as any, provider: 'anthropic', modelName };
     }
 
     case 'gateway': {
@@ -143,7 +143,7 @@ export async function getLanguageModel(options: ModelResolutionOptions = {}): Pr
       const modelName = modelStr || 'google/gemini-2.5-flash';
       logger.info({ provider: 'gateway', model: modelName }, '[AIProvider] Initializing Vercel AI Gateway via AI SDK');
       const gateway = createGateway({ apiKey });
-      return { model: gateway(modelName), provider: 'gateway', modelName };
+      return { model: gateway(modelName) as any, provider: 'gateway', modelName };
     }
 
     case 'gemini':
