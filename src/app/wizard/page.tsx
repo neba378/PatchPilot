@@ -18,7 +18,12 @@ import {
   LogOut,
   Search,
   Lock,
-  GitBranch
+  GitBranch,
+  Sparkles,
+  Bot,
+  Zap,
+  SlidersHorizontal,
+  Key
 } from 'lucide-react';
 
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
@@ -26,6 +31,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { AI_PROVIDERS, getProviderConfig } from '@/core/aiModels';
 
 interface GitHubUser {
   id?: number;
@@ -62,12 +68,21 @@ export default function SetupWizardPage() {
   const [repoSearchQuery, setRepoSearchQuery] = useState('');
 
   // Form State
+  const [activeProjectId, setActiveProjectId] = useState<string>('');
   const [projectName, setProjectName] = useState('Checkout Payment Service');
   const [repoOwner, setRepoOwner] = useState('nebiyu-org');
   const [repoName, setRepoName] = useState('checkout-api-service');
   const [defaultBranch, setDefaultBranch] = useState('main');
 
+  // AI Model State
+  const [aiProvider, setAiProvider] = useState<'gemini' | 'openai' | 'anthropic' | 'gateway'>('gemini');
+  const [aiModel, setAiModel] = useState<string>('gemini-2.5-flash');
+  const [isCustomModel, setIsCustomModel] = useState<boolean>(false);
+  const [customModelInput, setCustomModelInput] = useState<string>('');
+  const [aiApiKey, setAiApiKey] = useState<string>('');
   const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [aiSaveSuccess, setAiSaveSuccess] = useState<string | null>(null);
+
   const [sentrySecret, setSentrySecret] = useState('');
   const [telegramToken, setTelegramToken] = useState('');
   const [telegramChatId, setTelegramChatId] = useState('');
@@ -112,8 +127,52 @@ export default function SetupWizardPage() {
     }
   }, [fetchRepos]);
 
+  const loadExistingProject = useCallback(async () => {
+    try {
+      const res = await fetch('/api/projects');
+      const data = await res.json();
+      if (data.projects && data.projects.length > 0) {
+        const prj = data.projects[0];
+        setActiveProjectId(prj.id);
+        if (prj.name) setProjectName(prj.name);
+        if (prj.repoOwner) setRepoOwner(prj.repoOwner);
+        if (prj.repoName) setRepoName(prj.repoName);
+        if (prj.defaultBranch) setDefaultBranch(prj.defaultBranch);
+
+        const aiConn = prj.connections?.find((c: any) =>
+          ['gemini', 'openai', 'anthropic', 'gateway', 'ai'].includes(c.type)
+        );
+        if (aiConn) {
+          const prov = (aiConn.type === 'ai' ? 'gateway' : aiConn.type) as 'gemini' | 'openai' | 'anthropic' | 'gateway';
+          setAiProvider(prov);
+          const meta = aiConn.metadata || {};
+          const model = meta.model || (prov === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4o-mini');
+
+          const providerDef = AI_PROVIDERS.find(p => p.id === prov);
+          const isKnown = providerDef?.models.some(m => m.id === model);
+          if (isKnown) {
+            setAiModel(model);
+            setIsCustomModel(false);
+          } else {
+            setAiModel('custom');
+            setIsCustomModel(true);
+            setCustomModelInput(model);
+          }
+        }
+
+        const tgConn = prj.connections?.find((c: any) => c.type === 'telegram');
+        if (tgConn?.metadata?.chatId) {
+          setTelegramChatId(tgConn.metadata.chatId);
+        }
+      }
+    } catch (err: any) {
+      console.warn('Failed to load existing project:', err.message);
+    }
+  }, []);
+
   useEffect(() => {
     checkGitHubStatus();
+    loadExistingProject();
 
     // Listen for OAuth completion from popup / new tab
     const handleMessage = (event: MessageEvent) => {
@@ -139,7 +198,7 @@ export default function SetupWizardPage() {
       window.removeEventListener('message', handleMessage);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [checkGitHubStatus, fetchRepos]);
+  }, [checkGitHubStatus, fetchRepos, loadExistingProject]);
 
   const handleConnectGitHub = () => {
     window.open('/api/auth/github/login', '_blank');
@@ -170,18 +229,58 @@ export default function SetupWizardPage() {
     setProjectName(formatted);
   };
 
+  const handleSaveAIModelOnly = async () => {
+    if (!activeProjectId) {
+      setStep(3);
+      return;
+    }
+    setSaving(true);
+    setAiSaveSuccess(null);
+    try {
+      const effectiveModel = isCustomModel ? customModelInput.trim() : aiModel;
+      const res = await fetch('/api/projects', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: activeProjectId,
+          aiProvider,
+          aiModel: effectiveModel,
+          aiApiKey: aiApiKey || geminiApiKey
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAiSaveSuccess(`Active model updated to ${effectiveModel}!`);
+        setTimeout(() => setAiSaveSuccess(null), 3000);
+      } else {
+        alert(data.error || 'Failed to update AI model');
+      }
+    } catch (e: any) {
+      alert(`Error updating AI model: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleCreateProject = async () => {
     setSaving(true);
     try {
+      const effectiveModel = isCustomModel ? customModelInput.trim() : aiModel;
+      const effectiveAiKey = aiApiKey || geminiApiKey;
+
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          projectId: activeProjectId || undefined,
           name: projectName,
           repoOwner,
           repoName,
           defaultBranch,
-          geminiApiKey,
+          aiProvider,
+          aiModel: effectiveModel,
+          aiApiKey: effectiveAiKey,
+          geminiApiKey: effectiveAiKey,
           sentrySecret,
           telegramToken,
           telegramChatId
@@ -469,58 +568,226 @@ export default function SetupWizardPage() {
         </Card>
       )}
 
-      {/* Step 2: AI Model */}
-      {step === 2 && (
-        <Card className="border-border/70 bg-card/60">
-          <CardHeader className="p-5 pb-3">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <Cpu className="size-4 text-primary" />
-              Gemini AI Key
-            </CardTitle>
-          </CardHeader>
+      {/* Step 2: AI Model Selection & Configuration */}
+      {step === 2 && (() => {
+        const currentProviderConfig = getProviderConfig(aiProvider);
+        const selectedModelObj = currentProviderConfig.models.find(m => m.id === aiModel);
 
-          <CardContent className="p-5 pt-1 space-y-3.5 text-xs">
-            <div className="space-y-1">
-              <label className="text-muted-foreground">Google Gemini API Key</label>
-              <Input
-                type="password"
-                value={geminiApiKey}
-                onChange={(e) => setGeminiApiKey(e.target.value)}
-                placeholder="AIzaSy***********************************"
-                className="h-8 text-xs font-mono bg-muted/20"
-              />
-              <span className="text-[11px] text-muted-foreground/80 flex items-center gap-1">
-                Free keys available at
-                <a
-                  href="https://aistudio.google.com/app/apikey"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline inline-flex items-center gap-0.5"
-                >
-                  aistudio.google.com <ExternalLink className="size-2.5" />
-                </a>
-              </span>
-            </div>
-
-            <div className="p-3 bg-muted/30 border border-border/60 rounded-md text-muted-foreground space-y-1">
-              <span className="font-medium text-foreground block">Free Tier Rate Limits</span>
-              <p className="text-[11px] leading-relaxed">
-                Token bucket enforces 10 requests per minute and 250 requests per day to stay strictly within Google AI Studio free tier quotas.
+        return (
+          <Card className="border-border/70 bg-card/60">
+            <CardHeader className="p-5 pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <Cpu className="size-4 text-primary" />
+                  AI Model & Intelligence Provider
+                </CardTitle>
+                <Badge variant="outline" className="text-[10px] font-mono border-primary/40 text-primary">
+                  Multi-Model Engine
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Select your preferred AI foundation model or enter any custom model endpoint for root-cause synthesis and sandbox repairs.
               </p>
-            </div>
-          </CardContent>
+            </CardHeader>
 
-          <CardFooter className="flex justify-between border-t border-border/50 p-4">
-            <Button variant="outline" size="sm" onClick={() => setStep(1)} className="h-8 text-xs gap-1">
-              <ArrowLeft className="size-3" /> Back
-            </Button>
-            <Button size="sm" onClick={() => setStep(3)} className="h-8 text-xs gap-1">
-              Next: Monitoring
-              <ArrowRight className="size-3" />
-            </Button>
-          </CardFooter>
-        </Card>
-      )}
+            <CardContent className="p-5 pt-2 space-y-4 text-xs">
+              {aiSaveSuccess && (
+                <div className="p-2.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2">
+                  <Check className="size-3.5" />
+                  <span>{aiSaveSuccess}</span>
+                </div>
+              )}
+
+              {/* Provider Selection Cards */}
+              <div className="space-y-1.5">
+                <label className="text-muted-foreground font-medium flex items-center gap-1.5">
+                  <Sparkles className="size-3.5 text-primary" />
+                  1. Choose AI Provider
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {AI_PROVIDERS.map((prov) => {
+                    const isSelected = aiProvider === prov.id;
+                    return (
+                      <button
+                        key={prov.id}
+                        type="button"
+                        onClick={() => {
+                          setAiProvider(prov.id);
+                          setAiModel(prov.defaultModel);
+                          setIsCustomModel(false);
+                          setCustomModelInput('');
+                        }}
+                        className={`p-3 rounded-lg border text-left transition-all space-y-1 ${
+                          isSelected
+                            ? 'border-primary bg-primary/10 shadow-sm'
+                            : 'border-border/60 bg-muted/20 hover:border-border hover:bg-muted/40'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={`text-xs font-semibold ${isSelected ? 'text-primary' : 'text-foreground'}`}>
+                            {prov.name}
+                          </span>
+                          {isSelected && <Check className="size-3 text-primary" />}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground line-clamp-2 leading-tight">
+                          {prov.description}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Model Selection Dropdown */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-muted-foreground font-medium flex items-center gap-1.5">
+                    <Bot className="size-3.5 text-primary" />
+                    2. Select AI Model
+                  </label>
+                  <span className="text-[11px] text-muted-foreground">
+                    Provider: <strong className="text-foreground">{currentProviderConfig.name}</strong>
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <select
+                    value={isCustomModel ? 'custom' : aiModel}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === 'custom') {
+                        setIsCustomModel(true);
+                        setAiModel('custom');
+                        if (!customModelInput) setCustomModelInput('');
+                      } else {
+                        setIsCustomModel(false);
+                        setAiModel(val);
+                      }
+                    }}
+                    className="w-full h-9 rounded-md border border-border/80 bg-background/80 px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer font-mono"
+                  >
+                    {currentProviderConfig.models.map((m) => (
+                      <option key={m.id} value={m.id} className="bg-popover text-popover-foreground">
+                        {m.name} {m.contextWindow ? `(${m.contextWindow})` : ''} {m.recommended ? '★ Recommended' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Custom Model Input if 'custom' selected */}
+              {isCustomModel && (
+                <div className="p-3 bg-primary/5 border border-primary/30 rounded-md space-y-1.5 animate-in fade-in-50">
+                  <div className="flex items-center justify-between">
+                    <label className="text-foreground font-medium flex items-center gap-1.5 text-[11px]">
+                      <SlidersHorizontal className="size-3 text-primary" />
+                      Custom Model Identifier
+                    </label>
+                    <span className="text-[10px] text-muted-foreground font-mono">Any valid model string</span>
+                  </div>
+                  <Input
+                    type="text"
+                    value={customModelInput}
+                    onChange={(e) => setCustomModelInput(e.target.value)}
+                    placeholder={
+                      aiProvider === 'gemini'
+                        ? 'e.g. gemini-3.5-flash or gemini-2.5-pro'
+                        : aiProvider === 'openai'
+                        ? 'e.g. gpt-4.5-preview or o3-mini'
+                        : aiProvider === 'anthropic'
+                        ? 'e.g. claude-3-7-sonnet or claude-3-5-sonnet-latest'
+                        : 'e.g. deepseek/deepseek-chat or provider/model'
+                    }
+                    className="h-8 text-xs font-mono bg-background"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    You can type any model identifier supported by your provider account. PatchPilot will route investigation and code synthesis tasks to this model.
+                  </p>
+                </div>
+              )}
+
+              {/* Selected Model Capabilities Card */}
+              <div className="p-3 bg-muted/30 border border-border/60 rounded-md text-muted-foreground space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-foreground text-xs flex items-center gap-1.5">
+                    <Zap className="size-3.5 text-amber-400" />
+                    Active Model: <code className="text-primary font-mono">{isCustomModel ? (customModelInput || 'Custom Model') : aiModel}</code>
+                  </span>
+                  {selectedModelObj?.contextWindow && (
+                    <Badge variant="secondary" className="text-[10px] font-mono">
+                      {selectedModelObj.contextWindow} Context
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-[11px] leading-relaxed">
+                  {isCustomModel
+                    ? 'Using custom user-specified model identifier. Ensure your API key has authorization for this model.'
+                    : selectedModelObj?.description}
+                </p>
+                {currentProviderConfig.rateLimitNotice && (
+                  <p className="text-[10px] text-muted-foreground/80 pt-0.5 border-t border-border/40">
+                    💡 {currentProviderConfig.rateLimitNotice}
+                  </p>
+                )}
+              </div>
+
+              {/* Provider API Key Input */}
+              <div className="space-y-1">
+                <label className="text-muted-foreground font-medium flex items-center gap-1.5">
+                  <Key className="size-3 text-muted-foreground" />
+                  3. {currentProviderConfig.keyLabel}
+                </label>
+                <Input
+                  type="password"
+                  value={aiApiKey || geminiApiKey}
+                  onChange={(e) => {
+                    setAiApiKey(e.target.value);
+                    setGeminiApiKey(e.target.value);
+                  }}
+                  placeholder={currentProviderConfig.keyPlaceholder}
+                  className="h-8 text-xs font-mono bg-muted/20"
+                />
+                <span className="text-[11px] text-muted-foreground/80 flex items-center gap-1">
+                  Keys available at
+                  <a
+                    href={currentProviderConfig.keyHelpUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline inline-flex items-center gap-0.5"
+                  >
+                    {currentProviderConfig.keyHelpText} <ExternalLink className="size-2.5" />
+                  </a>
+                  {aiProvider === 'gemini' && ' (Free tier available)'}
+                </span>
+              </div>
+            </CardContent>
+
+            <CardFooter className="flex justify-between border-t border-border/50 p-4">
+              <Button variant="outline" size="sm" onClick={() => setStep(1)} className="h-8 text-xs gap-1">
+                <ArrowLeft className="size-3" /> Back
+              </Button>
+              <div className="flex items-center gap-2">
+                {activeProjectId && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSaveAIModelOnly}
+                    disabled={saving}
+                    className="h-8 text-xs gap-1 text-primary border-primary/40 hover:bg-primary/10"
+                  >
+                    <Check className="size-3" />
+                    Apply Model
+                  </Button>
+                )}
+                <Button size="sm" onClick={() => setStep(3)} className="h-8 text-xs gap-1">
+                  Next: Monitoring
+                  <ArrowRight className="size-3" />
+                </Button>
+              </div>
+            </CardFooter>
+          </Card>
+        );
+      })()}
 
       {/* Step 3: Monitoring */}
       {step === 3 && (

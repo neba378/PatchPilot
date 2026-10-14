@@ -1,4 +1,5 @@
 // worker/index.ts
+import 'dotenv/config';
 import { db } from '../src/db';
 import { jobs, incidents } from '../src/db/schema';
 import { eq } from 'drizzle-orm';

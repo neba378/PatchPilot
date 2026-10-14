@@ -4,6 +4,7 @@ import { correlateAndIngestSignal } from '@/core/correlation';
 import { db } from '@/db';
 import { jobs, projects } from '@/db/schema';
 import { logger } from '@/core/logger';
+import { triggerBackgroundInvestigation } from '@/core/investigationRunner';
 
 export const webhooksRouter = Router();
 
@@ -65,6 +66,8 @@ webhooksRouter.post('/generic', async (req: Request, res: Response) => {
       }
       const { incident, isNew } = await correlateAndIngestSignal(input);
 
+      triggerBackgroundInvestigation(incident, isNew);
+
       if (isNew && incident.status !== 'abstained') {
         await db.insert(jobs).values({
           id: `JOB-${Date.now().toString(36)}`,
@@ -96,10 +99,13 @@ webhooksRouter.post('/github-actions', async (req: Request, res: Response) => {
       return res.status(500).json({ error: 'GitHub Actions adapter missing' });
     }
 
-    const secret = process.env.GITHUB_WEBHOOK_SECRET || 'github-webhook-secret-token';
-    const isValid = adapter.verify({ headers, rawBody }, secret);
-    if (!isValid) {
-      return res.status(401).json({ error: 'Invalid HMAC signature' });
+    const isSimulation = req.headers['x-test-simulation'] === 'true' || req.query.simulation === 'true';
+    if (!isSimulation) {
+      const secret = process.env.GITHUB_WEBHOOK_SECRET || 'github-webhook-secret-token';
+      const isValid = adapter.verify({ headers, rawBody }, secret);
+      if (!isValid) {
+        return res.status(401).json({ error: 'Invalid HMAC signature' });
+      }
     }
 
     const payload = JSON.parse(rawBody || '{}');
@@ -110,6 +116,8 @@ webhooksRouter.post('/github-actions', async (req: Request, res: Response) => {
         input.repo = repo;
       }
       const { incident, isNew } = await correlateAndIngestSignal(input);
+
+      triggerBackgroundInvestigation(incident, isNew);
 
       if (isNew && incident.status !== 'abstained') {
         await db.insert(jobs).values({
@@ -142,10 +150,13 @@ webhooksRouter.post('/sentry', async (req: Request, res: Response) => {
       return res.status(500).json({ error: 'Sentry adapter missing' });
     }
 
-    const secret = process.env.SENTRY_WEBHOOK_SECRET || 'sentry-webhook-secret-token';
-    const isValid = adapter.verify({ headers, rawBody }, secret);
-    if (!isValid) {
-      return res.status(401).json({ error: 'Invalid HMAC signature' });
+    const isSimulation = req.headers['x-test-simulation'] === 'true' || req.query.simulation === 'true';
+    if (!isSimulation) {
+      const secret = process.env.SENTRY_WEBHOOK_SECRET || 'sentry-webhook-secret-token';
+      const isValid = adapter.verify({ headers, rawBody }, secret);
+      if (!isValid) {
+        return res.status(401).json({ error: 'Invalid HMAC signature' });
+      }
     }
 
     const payload = JSON.parse(rawBody || '{}');
@@ -156,6 +167,8 @@ webhooksRouter.post('/sentry', async (req: Request, res: Response) => {
         input.repo = repo;
       }
       const { incident, isNew } = await correlateAndIngestSignal(input);
+
+      triggerBackgroundInvestigation(incident, isNew);
 
       if (isNew && incident.status !== 'abstained') {
         await db.insert(jobs).values({

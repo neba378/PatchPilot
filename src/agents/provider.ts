@@ -30,36 +30,13 @@ export interface ResolvedModel {
   modelName: string;
 }
 
+import { AI_PROVIDERS } from '../core/aiModels';
+
 /**
  * Returns available provider list and defaults.
  */
 export function getSupportedProviders() {
-  return [
-    {
-      id: 'gemini',
-      name: 'Google Gemini',
-      defaultModel: 'gemini-flash-latest',
-      recommendedModels: ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.5-pro']
-    },
-    {
-      id: 'openai',
-      name: 'OpenAI',
-      defaultModel: 'gpt-4o-mini',
-      recommendedModels: ['gpt-4o-mini', 'gpt-4o', 'o3-mini']
-    },
-    {
-      id: 'anthropic',
-      name: 'Anthropic Claude',
-      defaultModel: 'claude-3-5-sonnet-20241022',
-      recommendedModels: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022']
-    },
-    {
-      id: 'gateway',
-      name: 'Vercel AI Gateway',
-      defaultModel: 'google/gemini-2.5-flash',
-      recommendedModels: ['google/gemini-2.5-flash', 'openai/gpt-4o-mini', 'anthropic/claude-3-5-sonnet']
-    }
-  ];
+  return AI_PROVIDERS;
 }
 
 /**
@@ -77,9 +54,9 @@ export async function getLanguageModel(options: ModelResolutionOptions = {}): Pr
       const projectConns = await db.select().from(connections)
         .where(eq(connections.projectId, options.projectId));
       
-      const aiConn = projectConns.find(c => ['gemini', 'openai', 'anthropic', 'ai'].includes(c.type));
+      const aiConn = projectConns.find(c => ['gemini', 'openai', 'anthropic', 'gateway', 'ai'].includes(c.type));
       if (aiConn) {
-        if (!providerStr) providerStr = aiConn.type === 'ai' ? 'gateway' : aiConn.type;
+        if (!providerStr) providerStr = (aiConn.type === 'ai' || aiConn.type === 'gateway') ? 'gateway' : aiConn.type;
         if (!keyStr) keyStr = aiConn.encryptedSecret || '';
         if (!modelStr && aiConn.metadata) {
           try {

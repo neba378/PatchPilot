@@ -16,7 +16,9 @@ import {
   GitPullRequest,
   Clock,
   AlertTriangle,
-  Trash2
+  Trash2,
+  Loader2,
+  Cpu
 } from 'lucide-react';
 
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -92,6 +94,10 @@ export default function DashboardPage() {
   const [activeFilter, setActiveFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [simulating, setSimulating] = useState<string | null>(null);
+  const [simulationFeedback, setSimulationFeedback] = useState<{
+    type: 'info' | 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -254,58 +260,118 @@ export default function DashboardPage() {
     setSimulating(type);
     const repoFullName = selectedProject
       ? `${selectedProject.repoOwner}/${selectedProject.repoName}`
-      : 'nebiyu-org/checkout-api-service';
+      : 'neba378/test';
+
+    const isSentry = type === 'sentry';
+    // Alternate between billingDetails and code bug to allow testing both scenarios!
+    const testReasonCode = Math.random() > 0.5;
+
+    setSimulationFeedback({
+      type: 'info',
+      message: isSentry
+        ? `📡 Ingesting Sentry exception telemetry for ${selectedProject?.name || 'Microservice'}...`
+        : `⚡ Triggering simulated GitHub Actions CI failure on branch ${selectedProject?.defaultBranch || 'main'}...`
+    });
 
     try {
-      await fetch(`/api/webhooks/${type === 'actions' ? 'github-actions' : type}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          type === 'sentry'
-            ? {
-                projectId: selectedProject?.id,
-                event: {
-                  event_id: `evt_${Date.now()}`,
-                  title: "TypeError: Cannot read properties of undefined (reading 'billingDetails')",
-                  metadata: { type: 'TypeError', value: "Cannot read properties of undefined (reading 'billingDetails')" },
-                  environment: 'production',
-                  release: `${repoFullName.split('/')[1] || 'service'}@a7b31e9`,
-                  entries: [
-                    {
-                      type: 'exception',
-                      data: {
-                        values: [{
-                          type: 'TypeError',
-                          value: "Cannot read properties of undefined (reading 'billingDetails')",
-                          stacktrace: {
-                            frames: [{ filename: 'src/controllers/paymentController.ts', lineno: 10, function: 'handleCheckout', in_app: true }]
-                          }
+      const url = `/api/webhooks/${type === 'actions' ? 'github-actions' : type}?simulation=true${selectedProject ? `&projectId=${selectedProject.id}` : ''}`;
+
+      const payload = isSentry
+        ? {
+            projectId: selectedProject?.id,
+            event: {
+              event_id: `evt_${Date.now()}`,
+              title: testReasonCode
+                ? "TypeError: Cannot read properties of undefined (reading 'code')"
+                : "TypeError: Cannot read properties of undefined (reading 'billingDetails')",
+              metadata: {
+                type: 'TypeError',
+                value: testReasonCode
+                  ? "Cannot read properties of undefined (reading 'code')"
+                  : "Cannot read properties of undefined (reading 'billingDetails')"
+              },
+              environment: 'production',
+              release: `${repoFullName.split('/')[1] || 'service'}@a7b31e9`,
+              entries: [
+                {
+                  type: 'exception',
+                  data: {
+                    values: [{
+                      type: 'TypeError',
+                      value: testReasonCode
+                        ? "Cannot read properties of undefined (reading 'code')"
+                        : "Cannot read properties of undefined (reading 'billingDetails')",
+                      stacktrace: {
+                        frames: [{
+                          filename: 'src/paymentController.ts',
+                          lineno: testReasonCode ? 44 : 17,
+                          function: testReasonCode ? 'handleRefund' : 'handleCheckout',
+                          in_app: true
                         }]
                       }
-                    }
-                  ]
+                    }]
+                  }
                 }
-              }
-            : {
-                projectId: selectedProject?.id,
-                workflow_run: {
-                  id: Math.floor(1000 + Math.random() * 9000),
-                  name: 'CI Test Suite',
-                  head_branch: selectedProject?.defaultBranch || 'main',
-                  head_sha: 'a7b31e9',
-                  conclusion: 'failure',
-                  display_title: 'feat: add customer metadata payload parsing in checkout'
-                },
-                repository: { full_name: repoFullName },
-                logExcerpt: "FAIL src/controllers/__tests__/checkout.test.ts\nTypeError: Cannot read properties of undefined (reading 'billingDetails')"
-              }
-        )
+              ]
+            }
+          }
+        : {
+            projectId: selectedProject?.id,
+            workflow_run: {
+              id: Math.floor(1000 + Math.random() * 9000),
+              name: 'CI Test Suite',
+              head_branch: selectedProject?.defaultBranch || 'main',
+              head_sha: 'a7b31e9',
+              conclusion: 'failure',
+              display_title: testReasonCode
+                ? 'feat: add customer refund handler'
+                : 'feat: add customer metadata payload parsing in checkout'
+            },
+            repository: { full_name: repoFullName },
+            logExcerpt: testReasonCode
+              ? "FAIL src/__tests__/paymentController.test.ts\nTypeError: Cannot read properties of undefined (reading 'code')\n  at handleRefund (src/paymentController.ts:44:33)"
+              : "FAIL src/__tests__/paymentController.test.ts\nTypeError: Cannot read properties of undefined (reading 'billingDetails')\n  at handleCheckout (src/paymentController.ts:17:33)"
+          };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-test-simulation': 'true'
+        },
+        body: JSON.stringify(payload)
       });
-      await fetchDashboardData();
-    } catch (e) {
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setSimulationFeedback({
+          type: 'success',
+          message: `✅ Simulation telemetry ingested! Autonomous AI investigation running & Telegram alert dispatched with interactive buttons.`
+        });
+        await fetchDashboardData();
+
+        // Auto poll for 8 seconds to reflect AI investigation transition to awaiting_approval
+        let count = 0;
+        const pollInterval = setInterval(async () => {
+          count++;
+          await fetchDashboardData();
+          if (count >= 4) clearInterval(pollInterval);
+        }, 2000);
+      } else {
+        setSimulationFeedback({
+          type: 'error',
+          message: `❌ Simulation error: ${data.error || 'Webhook rejected payload.'}`
+        });
+      }
+    } catch (e: any) {
       console.error('Simulation error:', e);
+      setSimulationFeedback({
+        type: 'error',
+        message: `Simulation request failed: ${e.message}`
+      });
     } finally {
-      setTimeout(() => setSimulating(null), 600);
+      setTimeout(() => setSimulating(null), 1000);
     }
   };
 
@@ -485,8 +551,8 @@ export default function DashboardPage() {
                             key={c.id}
                             className="text-[10px] font-mono px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 font-medium"
                           >
-                            {c.type === 'gemini' || c.type === 'openai' || c.type === 'anthropic' || c.type === 'gateway'
-                              ? `ai-sdk:${c.type}`
+                            {c.type === 'gemini' || c.type === 'openai' || c.type === 'anthropic' || c.type === 'gateway' || c.type === 'ai'
+                              ? `ai: ${c.metadata?.model || c.type}`
                               : c.type}
                           </span>
                         ))}
@@ -560,6 +626,21 @@ export default function DashboardPage() {
                   </a>
                   <span>•</span>
                   <span>branch: {selectedProject.defaultBranch}</span>
+                  {(() => {
+                    const aiConn = selectedProject.connections?.find(c =>
+                      ['gemini', 'openai', 'anthropic', 'gateway', 'ai'].includes(c.type)
+                    );
+                    const modelName = aiConn?.metadata?.model || (aiConn?.type ? `${aiConn.type}` : 'gemini-2.5-flash');
+                    return (
+                      <>
+                        <span>•</span>
+                        <span className="text-primary font-medium flex items-center gap-1">
+                          <Cpu className="size-3" />
+                          ai: {modelName}
+                        </span>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -599,6 +680,38 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
+
+          {/* Simulation Feedback Alert Banner */}
+          {simulationFeedback && (
+            <div
+              className={`p-3 rounded-lg border text-xs flex items-center justify-between gap-3 animate-in fade-in-50 ${
+                simulationFeedback.type === 'success'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                  : simulationFeedback.type === 'error'
+                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                    : 'bg-primary/10 border-primary/30 text-primary'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {simulationFeedback.type === 'success' ? (
+                  <CheckCircle2 className="size-4 shrink-0" />
+                ) : simulationFeedback.type === 'error' ? (
+                  <AlertTriangle className="size-4 shrink-0" />
+                ) : (
+                  <Loader2 className="size-4 shrink-0 animate-spin" />
+                )}
+                <span className="font-medium">{simulationFeedback.message}</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSimulationFeedback(null)}
+                className="h-6 text-[11px] px-2 hover:bg-transparent"
+              >
+                Dismiss
+              </Button>
+            </div>
+          )}
 
           {/* KPI Stats Grid */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
