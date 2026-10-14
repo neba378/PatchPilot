@@ -18,7 +18,8 @@ import {
   LogOut,
   Search,
   Lock,
-  GitBranch
+  GitBranch,
+  Boxes
 } from 'lucide-react';
 
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
@@ -66,6 +67,7 @@ export default function SetupWizardPage() {
   const [repoOwner, setRepoOwner] = useState('nebiyu-org');
   const [repoName, setRepoName] = useState('checkout-api-service');
   const [defaultBranch, setDefaultBranch] = useState('main');
+  const [sandboxProvider, setSandboxProvider] = useState<'local-docker' | 'e2b' | 'modal' | 'fake'>('local-docker');
 
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [sentrySecret, setSentrySecret] = useState('');
@@ -181,6 +183,7 @@ export default function SetupWizardPage() {
           repoOwner,
           repoName,
           defaultBranch,
+          sandboxProvider,
           geminiApiKey,
           sentrySecret,
           telegramToken,
@@ -191,7 +194,7 @@ export default function SetupWizardPage() {
       const data = await res.json();
       if (data.success) {
         setCreatedProject(data);
-        setStep(5);
+        setStep(6);
       } else {
         alert(data.error || 'Failed to save configuration');
       }
@@ -218,12 +221,13 @@ export default function SetupWizardPage() {
       </div>
 
       {/* Stepper Navigation */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 border-b border-border/60 pb-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 border-b border-border/60 pb-3">
         {[
-          { num: 1, title: 'GitHub Repository' },
+          { num: 1, title: 'GitHub Repo' },
           { num: 2, title: 'AI Model' },
-          { num: 3, title: 'Monitoring' },
-          { num: 4, title: 'Alerts' }
+          { num: 3, title: 'Sandbox' },
+          { num: 4, title: 'Monitoring' },
+          { num: 5, title: 'Alerts' }
         ].map((s) => (
           <button
             key={s.num}
@@ -515,6 +519,104 @@ export default function SetupWizardPage() {
               <ArrowLeft className="size-3" /> Back
             </Button>
             <Button size="sm" onClick={() => setStep(3)} className="h-8 text-xs gap-1">
+              Next: Sandbox
+              <ArrowRight className="size-3" />
+            </Button>
+          </CardFooter>
+        </Card>
+      )}
+
+      {/* Step 3: Execution Sandbox */}
+      {step === 3 && (
+        <Card className="border-border/70 bg-card/60">
+          <CardHeader className="p-5 pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <Boxes className="size-4 text-primary" />
+                Execution Sandbox
+              </CardTitle>
+              <Badge variant="outline" className="text-[10px] text-muted-foreground font-mono">
+                Default: Local Docker
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Choose where PatchPilot spins up isolated environments to reproduce issues and verify candidate fixes.
+            </p>
+          </CardHeader>
+
+          <CardContent className="p-5 pt-1 space-y-3 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {[
+                {
+                  id: 'local-docker',
+                  name: 'Local Docker',
+                  badge: 'Default',
+                  badgeVariant: 'secondary',
+                  desc: 'Runs isolated execution in local Docker containers. Recommended for standard workloads.'
+                },
+                {
+                  id: 'e2b',
+                  name: 'E2B Sandbox',
+                  badge: '3rd Party Cloud',
+                  badgeVariant: 'outline',
+                  desc: 'Secure cloud microVMs purpose-built for autonomous AI code execution.'
+                },
+                {
+                  id: 'modal',
+                  name: 'Modal Labs',
+                  badge: '3rd Party Cloud',
+                  badgeVariant: 'outline',
+                  desc: 'Elastic serverless cloud container infrastructure with on-demand scaling.'
+                },
+                {
+                  id: 'fake',
+                  name: 'In-Memory Simulation',
+                  badge: 'Mock',
+                  badgeVariant: 'outline',
+                  desc: 'Fast offline dry-run simulation without spinning up real containers.'
+                }
+              ].map((prov) => {
+                const isSelected = sandboxProvider === prov.id;
+                return (
+                  <div
+                    key={prov.id}
+                    onClick={() => setSandboxProvider(prov.id as any)}
+                    className={`p-3.5 rounded-lg border cursor-pointer transition-all space-y-1.5 ${
+                      isSelected
+                        ? 'border-primary bg-primary/10 shadow-sm'
+                        : 'border-border/60 bg-muted/20 hover:border-border hover:bg-muted/40'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-xs font-semibold ${isSelected ? 'text-primary' : 'text-foreground'}`}>
+                          {prov.name}
+                        </span>
+                        <Badge variant="outline" className="text-[9px] py-0 px-1 border-border/60">
+                          {prov.badge}
+                        </Badge>
+                      </div>
+                      {isSelected && <Check className="size-3.5 text-primary" />}
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">{prov.desc}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="p-3 bg-muted/30 border border-border/60 rounded-md text-muted-foreground space-y-1 mt-2">
+              <span className="font-medium text-foreground block text-[11px]">3rd-Party & Air-Gapped Security</span>
+              <p className="text-[11px] leading-relaxed">
+                Repository code is mounted into the sandbox as a clean snapshot. Your GitHub OAuth tokens and repository credentials NEVER enter the sandbox environment.
+              </p>
+            </div>
+          </CardContent>
+
+          <CardFooter className="flex justify-between border-t border-border/50 p-4">
+            <Button variant="outline" size="sm" onClick={() => setStep(2)} className="h-8 text-xs gap-1">
+              <ArrowLeft className="size-3" /> Back
+            </Button>
+            <Button size="sm" onClick={() => setStep(4)} className="h-8 text-xs gap-1">
               Next: Monitoring
               <ArrowRight className="size-3" />
             </Button>
@@ -522,8 +624,8 @@ export default function SetupWizardPage() {
         </Card>
       )}
 
-      {/* Step 3: Monitoring */}
-      {step === 3 && (
+      {/* Step 4: Monitoring */}
+      {step === 4 && (
         <Card className="border-border/70 bg-card/60">
           <CardHeader className="p-5 pb-3">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -564,10 +666,10 @@ export default function SetupWizardPage() {
           </CardContent>
 
           <CardFooter className="flex justify-between border-t border-border/50 p-4">
-            <Button variant="outline" size="sm" onClick={() => setStep(2)} className="h-8 text-xs gap-1">
+            <Button variant="outline" size="sm" onClick={() => setStep(3)} className="h-8 text-xs gap-1">
               <ArrowLeft className="size-3" /> Back
             </Button>
-            <Button size="sm" onClick={() => setStep(4)} className="h-8 text-xs gap-1">
+            <Button size="sm" onClick={() => setStep(5)} className="h-8 text-xs gap-1">
               Next: Alerts
               <ArrowRight className="size-3" />
             </Button>
@@ -575,8 +677,8 @@ export default function SetupWizardPage() {
         </Card>
       )}
 
-      {/* Step 4: Alerts */}
-      {step === 4 && (
+      {/* Step 5: Alerts */}
+      {step === 5 && (
         <Card className="border-border/70 bg-card/60">
           <CardHeader className="p-5 pb-3">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -613,7 +715,7 @@ export default function SetupWizardPage() {
           </CardContent>
 
           <CardFooter className="flex justify-between border-t border-border/50 p-4">
-            <Button variant="outline" size="sm" onClick={() => setStep(3)} className="h-8 text-xs gap-1">
+            <Button variant="outline" size="sm" onClick={() => setStep(4)} className="h-8 text-xs gap-1">
               <ArrowLeft className="size-3" /> Back
             </Button>
             <Button size="sm" onClick={handleCreateProject} disabled={saving} className="h-8 text-xs gap-1.5 font-medium">
@@ -624,8 +726,8 @@ export default function SetupWizardPage() {
         </Card>
       )}
 
-      {/* Step 5: Success */}
-      {step === 5 && createdProject && (
+      {/* Step 6: Success */}
+      {step === 6 && createdProject && (
         <Card className="border-emerald-500/30 bg-emerald-500/5">
           <CardHeader className="p-5 pb-3">
             <div className="flex items-center gap-2.5">

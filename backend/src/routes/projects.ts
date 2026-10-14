@@ -17,9 +17,14 @@ import {
 } from '@/db/schema';
 import { desc, eq } from 'drizzle-orm';
 import { decodeSessionCookie, GITHUB_SESSION_COOKIE_NAME } from '@/core/githubOAuth';
+import { sandboxRegistry } from '@/adapters/sandboxes/registry';
 import { logger } from '@/core/logger';
 
 export const projectsRouter = Router();
+
+projectsRouter.get('/sandboxes', async (_req: Request, res: Response) => {
+  return res.json({ sandboxes: sandboxRegistry.list() });
+});
 
 projectsRouter.get('/', async (_req: Request, res: Response) => {
   try {
@@ -51,6 +56,7 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
       repoOwner,
       repoName,
       defaultBranch = 'main',
+      sandboxProvider = 'local-docker',
       githubToken,
       aiProvider = 'gemini',
       aiModel,
@@ -69,6 +75,9 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
       });
     }
 
+    const allowedSandboxes = ['local-docker', 'e2b', 'modal', 'fake'];
+    const chosenSandbox = allowedSandboxes.includes(sandboxProvider) ? sandboxProvider : 'local-docker';
+
     const projectId = `proj_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now().toString(36)}`;
     const now = new Date().toISOString();
 
@@ -79,7 +88,7 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
       repoOwner,
       repoName,
       defaultBranch,
-      sandboxProvider: 'local-docker',
+      sandboxProvider: chosenSandbox,
       createdAt: now,
       updatedAt: now
     });
@@ -174,6 +183,42 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     logger.error({ error: err.message }, '[Projects] Create failed');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+projectsRouter.patch('/:id', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const { sandboxProvider, name, defaultBranch } = req.body || {};
+
+    const project = await db.select().from(projects).where(eq(projects.id, id)).get();
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const updates: Partial<typeof projects.$inferInsert> = {
+      updatedAt: new Date().toISOString()
+    };
+
+    if (sandboxProvider !== undefined) {
+      const allowed = ['local-docker', 'e2b', 'modal', 'fake'];
+      if (!allowed.includes(sandboxProvider)) {
+        return res.status(400).json({ error: `Invalid sandbox provider. Must be one of: ${allowed.join(', ')}` });
+      }
+      updates.sandboxProvider = sandboxProvider;
+    }
+
+    if (name) updates.name = name;
+    if (defaultBranch) updates.defaultBranch = defaultBranch;
+
+    await db.update(projects).set(updates).where(eq(projects.id, id));
+
+    const updated = await db.select().from(projects).where(eq(projects.id, id)).get();
+    logger.info({ projectId: id, sandboxProvider: updated?.sandboxProvider }, '[Projects] Project updated successfully');
+    return res.json({ success: true, project: updated });
+  } catch (err: any) {
+    logger.error({ error: err.message }, '[Projects] Update failed');
     return res.status(500).json({ error: err.message });
   }
 });

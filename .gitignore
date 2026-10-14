@@ -45,5 +45,5 @@ data/
 
 # Sandboxes & eval outputs
 eval/results/*.json
-sandboxes/
+/sandboxes/
 temp/

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Shield, Check, Save } from 'lucide-react';
+import { Shield, Check, Save, Boxes } from 'lucide-react';
 
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -140,6 +140,65 @@ export default function SettingsPage() {
               <span className="text-muted-foreground text-[11px] block">Rate Limit</span>
               <span className="text-foreground text-sm font-bold font-mono">10 RPM</span>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Execution Sandboxes */}
+      <Card className="border-border/70 bg-card/60">
+        <CardHeader className="p-4 sm:p-5 pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Boxes className="size-4 text-primary" />
+              Supported Execution Sandboxes
+            </CardTitle>
+            <Badge variant="outline" className="text-[10px] text-muted-foreground font-mono">
+              Default: Local Docker
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Isolated environments used to reproduce stack traces and verify candidate patches. Configurable per project.
+          </p>
+        </CardHeader>
+
+        <CardContent className="p-4 sm:p-5 pt-0">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            {[
+              {
+                id: 'local-docker',
+                name: 'Local Docker',
+                badge: 'Default',
+                desc: 'Runs test execution in local Docker container with volume isolation.'
+              },
+              {
+                id: 'e2b',
+                name: 'E2B Sandbox',
+                badge: '3rd Party Cloud',
+                desc: 'Secure cloud microVMs with dedicated compute per investigation.'
+              },
+              {
+                id: 'modal',
+                name: 'Modal Labs',
+                badge: '3rd Party Cloud',
+                desc: 'Elastic serverless cloud container infrastructure with on-demand scaling.'
+              },
+              {
+                id: 'fake',
+                name: 'In-Memory Simulation',
+                badge: 'Mock',
+                desc: 'Fast offline dry-run simulation without spinning up real containers.'
+              }
+            ].map((p) => (
+              <div key={p.id} className="p-3 bg-muted/20 rounded-lg border border-border/50 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-foreground font-mono text-xs">{p.name}</span>
+                  <Badge variant="outline" className="text-[9px] py-0 px-1 border-border/60">
+                    {p.badge}
+                  </Badge>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">{p.desc}</p>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>

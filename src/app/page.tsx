@@ -16,7 +16,8 @@ import {
   GitPullRequest,
   Clock,
   AlertTriangle,
-  Trash2
+  Trash2,
+  Boxes
 } from 'lucide-react';
 
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -155,6 +156,29 @@ export default function DashboardPage() {
       alert(err.message || 'Network error deleting project');
     } finally {
       setDeletingProjectId(null);
+    }
+  };
+
+  const [updatingSandbox, setUpdatingSandbox] = useState(false);
+
+  const handleUpdateSandboxProvider = async (projectId: string, newProvider: string) => {
+    setUpdatingSandbox(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sandboxProvider: newProvider })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setProjects(prev => prev.map(p => p.id === projectId ? { ...p, sandboxProvider: newProvider } : p));
+      } else {
+        alert(data.error || 'Failed to update sandbox provider');
+      }
+    } catch (err: any) {
+      alert(`Error updating sandbox provider: ${err.message}`);
+    } finally {
+      setUpdatingSandbox(false);
     }
   };
 
@@ -480,6 +504,15 @@ export default function DashboardPage() {
                         <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-muted/40 text-muted-foreground border border-border/40">
                           branch: {proj.defaultBranch}
                         </span>
+                        <span
+                          className={`text-[10px] font-mono px-2 py-0.5 rounded border font-medium ${
+                            proj.sandboxProvider === 'e2b' || proj.sandboxProvider === 'modal'
+                              ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
+                              : 'bg-muted/40 text-muted-foreground border-border/40'
+                          }`}
+                        >
+                          box: {proj.sandboxProvider || 'local-docker'}
+                        </span>
                         {proj.connections?.map((c) => (
                           <span
                             key={c.id}
@@ -548,7 +581,7 @@ export default function DashboardPage() {
                   <FolderGit2 className="size-5 text-primary" />
                   <span>{selectedProject.name}</span>
                 </h1>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono mt-0.5">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground font-mono mt-0.5">
                   <a
                     href={`https://github.com/${selectedProject.repoOwner}/${selectedProject.repoName}`}
                     target="_blank"
@@ -560,6 +593,23 @@ export default function DashboardPage() {
                   </a>
                   <span>•</span>
                   <span>branch: {selectedProject.defaultBranch}</span>
+                  <span>•</span>
+                  <div className="flex items-center gap-1.5 font-sans">
+                    <Boxes className="size-3 text-muted-foreground" />
+                    <span className="text-[11px] text-muted-foreground">Sandbox:</span>
+                    <select
+                      value={selectedProject.sandboxProvider || 'local-docker'}
+                      onChange={(e) => handleUpdateSandboxProvider(selectedProject.id, e.target.value)}
+                      disabled={updatingSandbox}
+                      className="bg-card text-foreground border border-border/70 rounded px-2 py-0.5 text-xs font-medium cursor-pointer focus:outline-none focus:border-primary"
+                    >
+                      <option value="local-docker">Local Docker (Default)</option>
+                      <option value="e2b">E2B Sandbox (3rd Party Cloud)</option>
+                      <option value="modal">Modal Labs (3rd Party Cloud)</option>
+                      <option value="fake">In-Memory Mock</option>
+                    </select>
+                    {updatingSandbox && <RefreshCw className="size-3 animate-spin text-primary" />}
+                  </div>
                 </div>
               </div>
 
@@ -597,6 +647,52 @@ export default function DashboardPage() {
                   <span>{deletingProjectId === selectedProject.id ? 'Deleting...' : 'Delete Project'}</span>
                 </Button>
               </div>
+            </div>
+          </div>
+
+          {/* Sandbox & Guardrails Info Banner */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 rounded-lg border border-border/70 bg-card/50 text-xs">
+            <div className="flex items-center gap-2.5">
+              <Boxes className="size-4 text-primary shrink-0" />
+              <div>
+                <span className="text-foreground font-medium">Assigned Execution Sandbox: </span>
+                <span className="font-mono text-primary font-semibold">
+                  {selectedProject.sandboxProvider || 'local-docker'}
+                </span>
+                <span className="text-muted-foreground ml-1.5">
+                  {selectedProject.sandboxProvider === 'e2b'
+                    ? '— Isolated 3rd-party cloud microVM for verification.'
+                    : selectedProject.sandboxProvider === 'modal'
+                    ? '— Serverless containerized cloud environment.'
+                    : selectedProject.sandboxProvider === 'fake'
+                    ? '— In-memory mock simulation sandbox.'
+                    : '— Local container sandbox with filesystem isolation (Default).'}
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 self-end sm:self-auto shrink-0">
+              {(['local-docker', 'e2b', 'modal', 'fake'] as const).map((prov) => (
+                <Button
+                  key={prov}
+                  variant={
+                    (selectedProject.sandboxProvider === prov) ||
+                    (!selectedProject.sandboxProvider && prov === 'local-docker')
+                      ? 'secondary'
+                      : 'ghost'
+                  }
+                  size="sm"
+                  disabled={updatingSandbox}
+                  onClick={() => handleUpdateSandboxProvider(selectedProject.id, prov)}
+                  className={`h-7 px-2.5 text-[11px] font-mono ${
+                    (selectedProject.sandboxProvider === prov) ||
+                    (!selectedProject.sandboxProvider && prov === 'local-docker')
+                      ? 'border border-primary/40 text-primary font-semibold bg-primary/10'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {prov}
+                </Button>
+              ))}
             </div>
           </div>
 

@@ -4,7 +4,7 @@ import { sandboxRegistry } from '../adapters/sandboxes/registry';
 import { gitHubAdapter, getGitHubAdapterForProject } from '../adapters/repohosts/github';
 import { generateFixEdits } from '../agents/fixer';
 import { db } from '../db';
-import { fixAttempts, pullRequests, incidents } from '../db/schema';
+import { fixAttempts, pullRequests, incidents, projects } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import { logger } from './logger';
 import { telegramAdapter } from '../adapters/channels/telegram';
@@ -49,8 +49,15 @@ export async function executeSandboxFix(
   const repo = process.env.TARGET_GITHUB_REPO || incident.repo || 'neba378/test';
   const commitRef = incident.commitSha || 'main';
   const repoHost = await getGitHubAdapterForProject(incident.projectId);
-  const providerType = process.env.SANDBOX_PROVIDER || 'local-docker';
+  let providerType = process.env.SANDBOX_PROVIDER || 'local-docker';
+  if (incident.projectId) {
+    const proj = await db.select({ sandboxProvider: projects.sandboxProvider }).from(projects).where(eq(projects.id, incident.projectId)).get();
+    if (proj?.sandboxProvider) {
+      providerType = proj.sandboxProvider;
+    }
+  }
   const provider = sandboxRegistry.get(providerType);
+  logger.info({ incidentId: incident.id, providerType, sandboxProvider: provider.id }, '[SandboxFixPipeline] Using sandbox provider');
 
   // 2. Fetch repo snapshot (no GitHub token ever enters sandbox!)
   const files = await repoHost.getSnapshot(repo, commitRef);

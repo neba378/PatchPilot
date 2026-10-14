@@ -186,6 +186,53 @@ describe('PatchPilot Standalone Express Backend API Tests', () => {
       expect(res.body.webhookUrls).toHaveProperty('generic');
     });
 
+    it('GET /api/projects/sandboxes returns list of supported sandboxes with local-docker default', async () => {
+      const res = await request(app)
+        .get('/api/projects/sandboxes')
+        .set('Cookie', authCookie);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('sandboxes');
+      const ids = res.body.sandboxes.map((s: any) => s.id);
+      expect(ids).toContain('local-docker');
+      expect(ids).toContain('e2b');
+      expect(ids).toContain('modal');
+    });
+
+    it('POST /api/projects supports 3rd-party sandboxProvider like e2b', async () => {
+      const uniqueName = `Project-e2b-${Date.now().toString(36)}`;
+      const res = await request(app)
+        .post('/api/projects')
+        .set('Cookie', authCookie)
+        .send({
+          name: uniqueName,
+          repoOwner: 'patchpilot-org',
+          repoName: 'test-service',
+          defaultBranch: 'main',
+          sandboxProvider: 'e2b'
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+
+      // Verify PATCH updates the sandbox provider
+      const patchRes = await request(app)
+        .patch(`/api/projects/${res.body.projectId}`)
+        .set('Cookie', authCookie)
+        .send({ sandboxProvider: 'modal' });
+
+      expect(patchRes.status).toBe(200);
+      expect(patchRes.body.project.sandboxProvider).toBe('modal');
+
+      // Reject invalid sandbox provider
+      const badPatch = await request(app)
+        .patch(`/api/projects/${res.body.projectId}`)
+        .set('Cookie', authCookie)
+        .send({ sandboxProvider: 'invalid-provider' });
+
+      expect(badPatch.status).toBe(400);
+    });
+
     it('POST /api/projects fails with 400 when missing required fields', async () => {
       const res = await request(app)
         .post('/api/projects')
