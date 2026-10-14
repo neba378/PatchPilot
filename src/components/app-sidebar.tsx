@@ -16,7 +16,8 @@ import {
   ExternalLink,
   ChevronDown,
   Layers,
-  Sparkles
+  Sparkles,
+  Palette
 } from "lucide-react"
 
 import {
@@ -63,6 +64,13 @@ const navItems = [
     url: "/settings",
     icon: Settings,
     badge: null,
+  },
+  {
+    title: "Design System",
+    url: "/design-system",
+    icon: Palette,
+    badge: "Theme",
+    badgeVariant: "purple" as const,
   },
 ]
 

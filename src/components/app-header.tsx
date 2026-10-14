@@ -14,10 +14,43 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Badge } from "@/components/ui/badge"
-import { ShieldCheck, Activity, Terminal } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator
+} from "@/components/ui/dropdown-menu"
+import { ShieldCheck, Activity, Terminal, Palette, Check } from "lucide-react"
+
+const themes = [
+  { id: 'obsidian', name: 'Obsidian Cobalt', color: '#3B82F6' },
+  { id: 'zinc', name: 'Zinc Indigo', color: '#6366F1' },
+  { id: 'emerald', name: 'Cyber Emerald', color: '#10B981' },
+  { id: 'graphite', name: 'Graphite Amber', color: '#F59E0B' }
+];
 
 export function AppHeader() {
   const pathname = usePathname()
+  const [activeTheme, setActiveTheme] = React.useState('obsidian')
+
+  React.useEffect(() => {
+    const urlTheme = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('theme') : null
+    const saved = urlTheme || (typeof window !== 'undefined' ? localStorage.getItem('patchpilot:theme') : null) || 'obsidian'
+    setActiveTheme(saved)
+    document.documentElement.setAttribute('data-theme', saved)
+    if (urlTheme && typeof window !== 'undefined') {
+      localStorage.setItem('patchpilot:theme', urlTheme)
+    }
+  }, [])
+
+  const setTheme = (themeId: string) => {
+    setActiveTheme(themeId)
+    document.documentElement.setAttribute('data-theme', themeId)
+    localStorage.setItem('patchpilot:theme', themeId)
+  }
 
   const getPageTitle = () => {
     if (pathname === "/") return { title: "Incident Operations Center", category: "Incidents" }
@@ -25,6 +58,7 @@ export function AppHeader() {
     if (pathname === "/wizard") return { title: "Project Creation & Resource Connector", category: "Setup" }
     if (pathname === "/eval") return { title: "Evaluation Harness & Benchmark", category: "Benchmark" }
     if (pathname === "/settings") return { title: "Governance & Safety Policy", category: "Settings" }
+    if (pathname === "/design-system") return { title: "Design System & Palette Selector", category: "Style Guide" }
     return { title: "Operations", category: "Platform" }
   }
 
@@ -58,12 +92,47 @@ export function AppHeader() {
         </Breadcrumb>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2.5">
         {/* Watchdog status badge */}
         <div className="hidden sm:flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-400 font-medium">
           <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
           <span>Proactive Watchdog Active</span>
         </div>
+
+        {/* Quick Palette Switcher Dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs border-border/80 bg-card">
+              <Palette className="size-3.5 text-primary" />
+              <span className="hidden md:inline capitalize">{activeTheme}</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuLabel className="text-[11px] font-semibold text-muted-foreground uppercase">
+              Select Palette
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {themes.map((t) => (
+              <DropdownMenuItem
+                key={t.id}
+                onClick={() => setTheme(t.id)}
+                className="flex items-center justify-between text-xs py-2 cursor-pointer"
+              >
+                <div className="flex items-center gap-2">
+                  <div className="size-3 rounded-full" style={{ backgroundColor: t.color }} />
+                  <span>{t.name}</span>
+                </div>
+                {activeTheme === t.id && <Check className="size-3.5 text-primary" />}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild className="text-xs text-primary font-medium cursor-pointer">
+              <Link href="/design-system" className="flex items-center gap-1.5">
+                Full Design System Spec →
+              </Link>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         {/* Security badge */}
         <Badge variant="outline" className="hidden lg:flex items-center gap-1.5 border-primary/20 bg-primary/5 text-primary text-[11px]">

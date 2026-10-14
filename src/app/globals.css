@@ -3,7 +3,9 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
+  /* Default Theme: Obsidian & Electric Cobalt */
+  :root,
+  [data-theme="obsidian"] {
     --background: 224 71% 4%;
     --foreground: 210 40% 98%;
 
@@ -34,7 +36,6 @@
 
     --radius: 0.625rem;
 
-    /* Sidebar Variables */
     --sidebar-background: 224 71% 3.5%;
     --sidebar-foreground: 215 20.2% 75.1%;
     --sidebar-primary: 217.2 91.2% 59.8%;
@@ -43,6 +44,126 @@
     --sidebar-accent-foreground: 210 40% 98%;
     --sidebar-border: 217.2 32.6% 13%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  /* Palette 2: Zinc & Indigo Linear */
+  [data-theme="zinc"] {
+    --background: 240 10% 4%;
+    --foreground: 0 0% 98%;
+
+    --card: 240 10% 7.5%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 240 10% 7.5%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 239 84% 67%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 5% 15%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 240 5% 13%;
+    --muted-foreground: 240 5% 65%;
+
+    --accent: 240 5% 18%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 350 89% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 6% 17%;
+    --input: 240 6% 17%;
+    --ring: 239 84% 67%;
+
+    --sidebar-background: 240 10% 3.5%;
+    --sidebar-foreground: 240 5% 75%;
+    --sidebar-primary: 239 84% 67%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 5% 12%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 240 6% 14%;
+    --sidebar-ring: 239 84% 67%;
+  }
+
+  /* Palette 3: Cyber Emerald & Mission Control */
+  [data-theme="emerald"] {
+    --background: 155 45% 3.5%;
+    --foreground: 150 20% 98%;
+
+    --card: 155 35% 6.5%;
+    --card-foreground: 150 20% 98%;
+
+    --popover: 155 35% 6.5%;
+    --popover-foreground: 150 20% 98%;
+
+    --primary: 160 84% 42%;
+    --primary-foreground: 160 50% 6%;
+
+    --secondary: 155 25% 13%;
+    --secondary-foreground: 150 20% 98%;
+
+    --muted: 155 25% 11%;
+    --muted-foreground: 150 15% 65%;
+
+    --accent: 155 25% 16%;
+    --accent-foreground: 150 20% 98%;
+
+    --destructive: 347 77% 53%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 155 30% 14%;
+    --input: 155 30% 14%;
+    --ring: 160 84% 42%;
+
+    --sidebar-background: 155 45% 2.8%;
+    --sidebar-foreground: 150 15% 75%;
+    --sidebar-primary: 160 84% 42%;
+    --sidebar-primary-foreground: 160 50% 6%;
+    --sidebar-accent: 155 25% 10%;
+    --sidebar-accent-foreground: 150 20% 98%;
+    --sidebar-border: 155 30% 11%;
+    --sidebar-ring: 160 84% 42%;
+  }
+
+  /* Palette 4: Graphite & Safety Amber */
+  [data-theme="graphite"] {
+    --background: 222 47% 10%;
+    --foreground: 210 40% 98%;
+
+    --card: 217 33% 15%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 217 33% 15%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 38 92% 50%;
+    --primary-foreground: 38 95% 10%;
+
+    --secondary: 217 25% 20%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217 25% 17%;
+    --muted-foreground: 215 20% 70%;
+
+    --accent: 217 25% 23%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217 25% 22%;
+    --input: 217 25% 22%;
+    --ring: 38 92% 50%;
+
+    --sidebar-background: 222 47% 8%;
+    --sidebar-foreground: 215 20% 75%;
+    --sidebar-primary: 38 92% 50%;
+    --sidebar-primary-foreground: 38 95% 10%;
+    --sidebar-accent: 217 25% 16%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 217 25% 18%;
+    --sidebar-ring: 38 92% 50%;
   }
 
   * {
