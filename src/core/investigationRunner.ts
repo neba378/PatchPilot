@@ -65,3 +65,11 @@ export async function executeInvestigationForIncident(incidentId: string, jobId?
     }
   }
 }
+
+export function triggerBackgroundInvestigation(incident: any, isNew?: boolean): void {
+  if (incident && incident.status !== 'abstained') {
+    executeInvestigationForIncident(incident.id).catch((err: any) => {
+      logger.error({ error: err.message, incidentId: incident.id }, '[InvestigationRunner] Background execution error');
+    });
+  }
+}
