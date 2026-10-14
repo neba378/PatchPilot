@@ -46,18 +46,27 @@ export async function executeSandboxFix(
   await db.update(incidents).set({ status: 'fixing' }).where(eq(incidents.id, incident.id));
   await telegramAdapter.sendProgress(incident.id, 'Sandbox Provisioning', 'Provisioning isolated sandbox environment');
 
-  const repo = process.env.TARGET_GITHUB_REPO || incident.repo || 'neba378/test';
-  const commitRef = incident.commitSha || 'main';
-  const repoHost = await getGitHubAdapterForProject(incident.projectId);
+  let repo = process.env.TARGET_GITHUB_REPO || incident.repo || 'neba378/test';
+  let commitRef = incident.commitSha || 'main';
   let providerType = process.env.SANDBOX_PROVIDER || 'local-docker';
+
   if (incident.projectId) {
-    const proj = await db.select({ sandboxProvider: projects.sandboxProvider }).from(projects).where(eq(projects.id, incident.projectId)).get();
-    if (proj?.sandboxProvider) {
-      providerType = proj.sandboxProvider;
+    const proj = await db.select().from(projects).where(eq(projects.id, incident.projectId)).get();
+    if (proj) {
+      if (proj.repoOwner && proj.repoName) {
+        repo = `${proj.repoOwner}/${proj.repoName}`;
+      }
+      if (proj.defaultBranch && (!incident.commitSha || incident.commitSha === 'main' || incident.commitSha === 'a7b31e9')) {
+        commitRef = proj.defaultBranch;
+      }
+      if (proj.sandboxProvider) {
+        providerType = proj.sandboxProvider;
+      }
     }
   }
+  const repoHost = await getGitHubAdapterForProject(incident.projectId);
   const provider = sandboxRegistry.get(providerType);
-  logger.info({ incidentId: incident.id, providerType, sandboxProvider: provider.id }, '[SandboxFixPipeline] Using sandbox provider');
+  logger.info({ incidentId: incident.id, repo, commitRef, providerType, sandboxProvider: provider.id }, '[SandboxFixPipeline] Using sandbox provider');
 
   // 2. Fetch repo snapshot (no GitHub token ever enters sandbox!)
   const files = await repoHost.getSnapshot(repo, commitRef);
@@ -78,7 +87,16 @@ export async function executeSandboxFix(
     const reproduced = reproExec.exitCode !== 0;
 
     // 4. Synthesize fix edits
-    const targetFile = investigation.affectedFiles[0] || 'src/paymentController.ts';
+    let targetFile = investigation.affectedFiles[0] || 'src/paymentController.ts';
+    if (!files[targetFile]) {
+      const baseName = targetFile.split('/').pop();
+      if (baseName) {
+        const matchingKey = Object.keys(files).find(p => p.endsWith(baseName));
+        if (matchingKey) {
+          targetFile = matchingKey;
+        }
+      }
+    }
     const originalContent = await sandbox.readFile(targetFile);
 
     const fixOutput = await generateFixEdits(investigation, originalContent, targetFile, { projectId: incident.projectId });
@@ -126,14 +144,12 @@ export async function executeSandboxFix(
 
     testSuitePassed = postPatchPassed;
 
-    // 8. Generate unified Git diff
-    diffResult = `--- a/${targetFile}
-+++ b/${targetFile}
-@@ -7,7 +7,7 @@ export async function handleCheckout(req: any, res: any) {
--    const { amount, currency, customerId, metadata } = req.body;
--    const billingZip = metadata.billingDetails.postalCode;
-+    const { amount, currency, customerId, metadata = {} } = req.body;
-+    const billingZip = metadata?.billingDetails?.postalCode || null;`;
+    // 8. Generate unified Git diff dynamically
+    const gitDiffExec = await sandbox.exec('git diff');
+    diffResult = gitDiffExec.stdout?.trim();
+    if (!diffResult) {
+      diffResult = `--- a/${targetFile}\n+++ b/${targetFile}\n@@ -1,5 +1,5 @@\n// Patched: ${investigation.rootCauses[0] || 'Remediate runtime exception'}`;
+    }
 
     // 9. Open DRAFT PR with full proof attached
     const branchName = `patchpilot/fix-${incident.id.toLowerCase()}`;

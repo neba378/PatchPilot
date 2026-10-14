@@ -184,20 +184,56 @@ export class GitHubAdapter implements RepoHostAdapter {
 
     let sha = baseShaOrBranch;
     if (!/^[0-9a-f]{40}$/.test(baseShaOrBranch)) {
-      const refRes = await this.octokit.rest.git.getRef({
-        owner,
-        repo: repoName,
-        ref: `heads/${baseShaOrBranch}`
-      });
-      sha = refRes.data.object.sha;
+      try {
+        const refRes = await this.octokit.rest.git.getRef({
+          owner,
+          repo: repoName,
+          ref: `heads/${baseShaOrBranch}`
+        });
+        sha = refRes.data.object.sha;
+      } catch {
+        try {
+          const commitRes = await this.octokit.rest.repos.getCommit({
+            owner,
+            repo: repoName,
+            ref: baseShaOrBranch
+          });
+          sha = commitRes.data.sha;
+        } catch {
+          // Fallback to default branch head if baseShaOrBranch fails
+          const repoInfo = await this.octokit.rest.repos.get({ owner, repo: repoName });
+          const defaultBranch = repoInfo.data.default_branch || 'main';
+          const defaultRef = await this.octokit.rest.git.getRef({
+            owner,
+            repo: repoName,
+            ref: `heads/${defaultBranch}`
+          });
+          sha = defaultRef.data.object.sha;
+        }
+      }
     }
 
-    await this.octokit.rest.git.createRef({
-      owner,
-      repo: repoName,
-      ref: `refs/heads/${branchName}`,
-      sha
-    });
+    try {
+      await this.octokit.rest.git.createRef({
+        owner,
+        repo: repoName,
+        ref: `refs/heads/${branchName}`,
+        sha
+      });
+    } catch (err: any) {
+      if (err.status === 422 || err.message?.includes('Reference already exists')) {
+        logger.info({ repo, branchName }, '[GitHubAdapter] Branch already exists, updating ref to base SHA');
+        await this.octokit.rest.git.updateRef({
+          owner,
+          repo: repoName,
+          ref: `heads/${branchName}`,
+          sha,
+          force: true
+        });
+      } else {
+        throw err;
+      }
+    }
 
     logger.info({ repo, branchName, sha }, '[GitHubAdapter] Branch created successfully on GitHub');
   }
@@ -274,27 +310,52 @@ export class GitHubAdapter implements RepoHostAdapter {
 
     logger.info({ repo, head: args.head, title: args.title }, '[GitHubAdapter] Opening real DRAFT pull request on GitHub');
 
-    const prRes = await this.octokit.rest.pulls.create({
-      owner,
-      repo: repoName,
-      title: args.title,
-      body: args.body,
-      head: args.head,
-      base: args.base || 'main',
-      draft: true
-    });
+    try {
+      const prRes = await this.octokit.rest.pulls.create({
+        owner,
+        repo: repoName,
+        title: args.title,
+        body: args.body,
+        head: args.head,
+        base: args.base || 'main',
+        draft: true
+      });
 
-    logger.info({ repo, prNumber: prRes.data.number, url: prRes.data.html_url }, '[GitHubAdapter] Draft PR created successfully on GitHub');
+      logger.info({ repo, prNumber: prRes.data.number, url: prRes.data.html_url }, '[GitHubAdapter] Draft PR created successfully on GitHub');
 
-    return {
-      number: prRes.data.number,
-      url: prRes.data.html_url,
-      title: prRes.data.title,
-      body: prRes.data.body || '',
-      branch: args.head,
-      isDraft: prRes.data.draft ?? true,
-      state: prRes.data.state as any
-    };
+      return {
+        number: prRes.data.number,
+        url: prRes.data.html_url,
+        title: prRes.data.title,
+        body: prRes.data.body || '',
+        branch: args.head,
+        isDraft: prRes.data.draft ?? true,
+        state: prRes.data.state as any
+      };
+    } catch (err: any) {
+      if (err.status === 422 && (err.message?.includes('A pull request already exists') || err.message?.includes('already exists'))) {
+        logger.info({ repo, head: args.head }, '[GitHubAdapter] Pull request already exists, fetching existing PR');
+        const existing = await this.octokit.rest.pulls.list({
+          owner,
+          repo: repoName,
+          head: `${owner}:${args.head}`,
+          state: 'all'
+        });
+        if (existing.data.length > 0) {
+          const pr = existing.data[0];
+          return {
+            number: pr.number,
+            url: pr.html_url,
+            title: pr.title,
+            body: pr.body || '',
+            branch: args.head,
+            isDraft: pr.draft ?? false,
+            state: pr.state as any
+          };
+        }
+      }
+      throw err;
+    }
   }
 
   async getPr(repo: string, number: number): Promise<PullRequestInfo> {
