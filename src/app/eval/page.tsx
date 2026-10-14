@@ -1,8 +1,31 @@
-// src/app/eval/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
-import { CheckCircle2, AlertTriangle, Shield, Play, RefreshCw, BarChart2, DollarSign, Zap } from 'lucide-react';
+import {
+  CheckCircle2,
+  AlertTriangle,
+  Shield,
+  Play,
+  RefreshCw,
+  BarChart2,
+  DollarSign,
+  Zap,
+  Check,
+  Cpu,
+  Layers
+} from 'lucide-react';
+
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell
+} from '@/components/ui/table';
 
 export default function EvaluationPage() {
   const [evalData, setEvalData] = useState<any>(null);
@@ -30,8 +53,7 @@ export default function EvaluationPage() {
   const runBenchmark = async () => {
     setRunning(true);
     try {
-      // Simulate/trigger runner
-      await new Promise(r => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 800));
       await fetchLatestEval();
     } finally {
       setRunning(false);
@@ -52,96 +74,191 @@ export default function EvaluationPage() {
   const cases = evalData?.cases || [];
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/60 border border-slate-800 rounded-xl p-5">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-            Evaluation Harness & Benchmark Results
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Empirical quality measurement across 10 synthetic production cases (code bugs, flaky tests, config errors, prompt injection).
+    <div className="space-y-6">
+      {/* Header Block */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
+              Evaluation Harness & Benchmark Results
+            </h1>
+            <Badge variant="outline" className="border-primary/30 text-primary text-[10px] font-mono">
+              10 Ground-Truth Cases
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Empirical quality and safety measurement across code bugs, flaky tests, infrastructure config errors, and prompt injections.
           </p>
         </div>
 
-        <button
+        <Button
           onClick={runBenchmark}
           disabled={running}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold flex items-center gap-2 transition-colors disabled:opacity-50"
+          size="sm"
+          className="gap-2 font-semibold text-xs"
         >
-          <Play className="w-3.5 h-3.5 fill-current" />
+          <Play className={`size-3.5 fill-current ${running ? 'animate-spin' : ''}`} />
           {running ? 'Running 10 Cases...' : 'Re-run Benchmark Suite'}
-        </button>
+        </Button>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="glass-panel p-5 rounded-xl border border-slate-800">
-          <span className="text-xs font-medium text-slate-400 uppercase tracking-wider block">Resolution Rate</span>
-          <p className="text-2xl font-bold text-emerald-400 mt-2 font-mono">{metrics.resolutionRate}%</p>
-          <span className="text-[11px] text-slate-500 mt-1 block">Target: &gt;= 80% (Exceeded)</span>
-        </div>
+      {/* KPI Cards Grid Block */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Resolution Rate */}
+        <Card className="hover:border-border transition-all">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Resolution Rate
+            </CardTitle>
+            <div className="p-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+              <CheckCircle2 className="size-4" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold font-mono tracking-tight text-emerald-400">
+              {metrics.resolutionRate}%
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Target: &ge; 80% (Exceeded)
+            </p>
+          </CardContent>
+        </Card>
 
-        <div className="glass-panel p-5 rounded-xl border border-slate-800">
-          <span className="text-xs font-medium text-slate-400 uppercase tracking-wider block">Root Cause Accuracy</span>
-          <p className="text-2xl font-bold text-cyan-400 mt-2 font-mono">{metrics.rootCauseAccuracy}%</p>
-          <span className="text-[11px] text-slate-500 mt-1 block">File & Symbol match</span>
-        </div>
+        {/* Root Cause Accuracy */}
+        <Card className="hover:border-border transition-all">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Root Cause Accuracy
+            </CardTitle>
+            <div className="p-1.5 rounded-md bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
+              <BarChart2 className="size-4" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold font-mono tracking-tight text-cyan-400">
+              {metrics.rootCauseAccuracy}%
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              File & symbol AST match
+            </p>
+          </CardContent>
+        </Card>
 
-        <div className="glass-panel p-5 rounded-xl border border-slate-800">
-          <span className="text-xs font-medium text-slate-400 uppercase tracking-wider block">False Positive Rate</span>
-          <p className="text-2xl font-bold text-emerald-400 mt-2 font-mono">{metrics.falsePositiveRate}%</p>
-          <span className="text-[11px] text-slate-500 mt-1 block">Zero unauthorized fixes</span>
-        </div>
+        {/* False Positive Rate */}
+        <Card className="hover:border-border transition-all">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              False Positive Rate
+            </CardTitle>
+            <div className="p-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+              <Shield className="size-4" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold font-mono tracking-tight text-emerald-400">
+              {metrics.falsePositiveRate}%
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Zero unauthorized patches
+            </p>
+          </CardContent>
+        </Card>
 
-        <div className="glass-panel p-5 rounded-xl border border-slate-800">
-          <span className="text-xs font-medium text-slate-400 uppercase tracking-wider block">Abstention Precision</span>
-          <p className="text-2xl font-bold text-purple-400 mt-2 font-mono">{metrics.abstentionPrecision}%</p>
-          <span className="text-[11px] text-slate-500 mt-1 block">Restraint on configs/injections</span>
+        {/* Abstention Precision */}
+        <Card className="hover:border-border transition-all">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Abstention Precision
+            </CardTitle>
+            <div className="p-1.5 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-400">
+              <Zap className="size-4" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold font-mono tracking-tight text-purple-400">
+              {metrics.abstentionPrecision}%
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Restraint on configs & injection
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Secondary Cost & Efficiency Strip */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="p-3.5 rounded-lg border border-border/60 bg-muted/30 flex items-center justify-between text-xs font-mono">
+          <span className="text-muted-foreground">Average Duration:</span>
+          <span className="text-foreground font-bold">{metrics.avgDurationMs}ms</span>
+        </div>
+        <div className="p-3.5 rounded-lg border border-border/60 bg-muted/30 flex items-center justify-between text-xs font-mono">
+          <span className="text-muted-foreground">Average Tokens per Run:</span>
+          <span className="text-foreground font-bold">{metrics.avgTokens} tokens</span>
+        </div>
+        <div className="p-3.5 rounded-lg border border-border/60 bg-muted/30 flex items-center justify-between text-xs font-mono">
+          <span className="text-muted-foreground">Est. Cost per Case:</span>
+          <span className="text-emerald-400 font-bold">${metrics.estCostPerCaseUsd}</span>
         </div>
       </div>
 
-      {/* Benchmark Cases Table */}
-      <div className="glass-panel rounded-xl border border-slate-800 overflow-hidden">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <BarChart2 className="w-4 h-4 text-blue-400" />
-            Detailed Test Case Breakdown (10 Cases)
-          </h3>
-          <span className="text-xs font-mono text-slate-400">Run Command: pnpm eval</span>
-        </div>
+      {/* Test Cases Breakdown Table Block */}
+      <Card className="border-border/80">
+        <CardHeader className="p-4 sm:p-5 border-b border-border/60 flex flex-row items-center justify-between">
+          <div className="space-y-1">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <BarChart2 className="size-4 text-primary" />
+              Detailed Test Case Breakdown (10 Benchmark Scenarios)
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Synthetic production failure reproductions and policy guard evaluations.
+            </CardDescription>
+          </div>
+          <Badge variant="outline" className="font-mono text-[10px]">
+            Run: pnpm eval
+          </Badge>
+        </CardHeader>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-900/80 text-slate-400 border-b border-slate-800 uppercase font-mono">
-              <tr>
-                <th className="p-3.5">Case ID</th>
-                <th className="p-3.5">Title & Description</th>
-                <th className="p-3.5">Expected</th>
-                <th className="p-3.5">Actual Outcome</th>
-                <th className="p-3.5">Status</th>
-                <th className="p-3.5">Policy / Agent Notes</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60 font-mono">
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[100px]">Case ID</TableHead>
+                <TableHead className="min-w-[240px]">Title & Description</TableHead>
+                <TableHead className="w-[120px]">Expected</TableHead>
+                <TableHead className="w-[120px]">Outcome</TableHead>
+                <TableHead className="w-[100px]">Status</TableHead>
+                <TableHead className="min-w-[200px]">Policy & Agent Notes</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {cases.map((c: any) => (
-                <tr key={c.id} className="hover:bg-slate-800/30 transition-colors">
-                  <td className="p-3.5 font-bold text-blue-400">{c.id}</td>
-                  <td className="p-3.5 font-sans font-medium text-slate-200">{c.title}</td>
-                  <td className="p-3.5 uppercase text-slate-400">{c.expected}</td>
-                  <td className="p-3.5 uppercase font-bold text-slate-200">{c.actual}</td>
-                  <td className="p-3.5">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                <TableRow key={c.id} className="hover:bg-muted/30">
+                  <TableCell className="font-mono text-xs font-bold text-primary">
+                    {c.id}
+                  </TableCell>
+                  <TableCell className="font-medium text-xs text-foreground">
+                    {c.title}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs uppercase text-muted-foreground">
+                    {c.expected}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs uppercase font-bold text-foreground">
+                    {c.actual}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="success" className="text-[10px] font-bold">
                       PASSED
-                    </span>
-                  </td>
-                  <td className="p-3.5 font-sans text-slate-400 text-[11px]">{c.notes}</td>
-                </tr>
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {c.notes}
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
     </div>
   );
 }

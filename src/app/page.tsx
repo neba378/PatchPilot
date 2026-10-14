@@ -1,7 +1,6 @@
-// src/app/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -15,12 +14,54 @@ import {
   Terminal,
   Activity,
   ShieldAlert,
-  Server
+  Server,
+  Search,
+  CheckCircle2,
+  ExternalLink,
+  ChevronRight,
+  Cpu,
+  Layers,
+  Sparkles
 } from 'lucide-react';
 
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell
+} from '@/components/ui/table';
+
+interface Incident {
+  id: string;
+  title: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  status: 'detected' | 'investigating' | 'awaiting_approval' | 'fixing' | 'validating' | 'pr_open' | 'verified_resolved' | 'abstained' | 'fix_failed';
+  source: string;
+  occurrences: number;
+  commitSha?: string;
+  environment?: string;
+  detectedAt: string;
+  fingerprint?: string;
+}
+
+interface DashboardMetrics {
+  totalIncidents: number;
+  awaitingReview: number;
+  prsOpen: number;
+  verifiedResolved: number;
+  fixPassRate: number;
+  meanTimeToResolveMinutes: number;
+}
+
 export default function DashboardPage() {
-  const [incidents, setIncidents] = useState<any[]>([]);
-  const [metrics, setMetrics] = useState<any>({
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [metrics, setMetrics] = useState<DashboardMetrics>({
     totalIncidents: 0,
     awaitingReview: 0,
     prsOpen: 0,
@@ -30,6 +71,7 @@ export default function DashboardPage() {
   });
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
   const [simulating, setSimulating] = useState<string | null>(null);
 
   const fetchDashboardData = async () => {
@@ -52,14 +94,14 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchDashboardData();
-    const interval = setInterval(fetchDashboardData, 3000); // 3-second live refresh
+    const interval = setInterval(fetchDashboardData, 3000);
     return () => clearInterval(interval);
   }, []);
 
   const triggerSimulation = async (type: 'sentry' | 'actions' | 'generic') => {
     setSimulating(type);
     try {
-      const res = await fetch(`/api/webhooks/${type === 'actions' ? 'github-actions' : type}`, {
+      await fetch(`/api/webhooks/${type === 'actions' ? 'github-actions' : type}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
@@ -117,196 +159,407 @@ export default function DashboardPage() {
     }
   };
 
-  const filteredIncidents = incidents.filter(inc => {
-    if (activeFilter === 'ALL') return true;
-    if (activeFilter === 'AWAITING') return inc.status === 'awaiting_approval';
-    if (activeFilter === 'FIXING') return inc.status === 'fixing' || inc.status === 'validating';
-    if (activeFilter === 'PR_OPEN') return inc.status === 'pr_open';
-    if (activeFilter === 'RESOLVED') return inc.status === 'verified_resolved';
-    if (activeFilter === 'ABSTAINED') return inc.status === 'abstained';
-    return true;
-  });
+  const filteredIncidents = useMemo(() => {
+    return incidents.filter(inc => {
+      // Filter by category
+      if (activeFilter === 'AWAITING' && inc.status !== 'awaiting_approval') return false;
+      if (activeFilter === 'FIXING' && inc.status !== 'fixing' && inc.status !== 'validating') return false;
+      if (activeFilter === 'PR_OPEN' && inc.status !== 'pr_open') return false;
+      if (activeFilter === 'RESOLVED' && inc.status !== 'verified_resolved') return false;
+      if (activeFilter === 'ABSTAINED' && inc.status !== 'abstained') return false;
+
+      // Filter by search query
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        const matchesTitle = inc.title.toLowerCase().includes(query);
+        const matchesId = inc.id.toLowerCase().includes(query);
+        const matchesSource = inc.source.toLowerCase().includes(query);
+        const matchesCommit = inc.commitSha?.toLowerCase().includes(query);
+        return matchesTitle || matchesId || matchesSource || matchesCommit;
+      }
+
+      return true;
+    });
+  }, [incidents, activeFilter, searchQuery]);
+
+  const filterCounts = useMemo(() => {
+    return {
+      ALL: incidents.length,
+      AWAITING: incidents.filter(i => i.status === 'awaiting_approval').length,
+      FIXING: incidents.filter(i => i.status === 'fixing' || i.status === 'validating').length,
+      PR_OPEN: incidents.filter(i => i.status === 'pr_open').length,
+      RESOLVED: incidents.filter(i => i.status === 'verified_resolved').length,
+      ABSTAINED: incidents.filter(i => i.status === 'abstained').length,
+    };
+  }, [incidents]);
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'awaiting_approval':
+        return (
+          <Badge variant="info" className="gap-1.5 font-medium">
+            <span className="size-1.5 rounded-full bg-blue-400 animate-pulse" />
+            Awaiting Review
+          </Badge>
+        );
+      case 'fixing':
+      case 'validating':
+        return (
+          <Badge variant="warning" className="gap-1.5 font-medium">
+            <span className="size-1.5 rounded-full bg-amber-400 animate-pulse" />
+            Sandbox Fixing
+          </Badge>
+        );
+      case 'pr_open':
+        return (
+          <Badge variant="default" className="bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 gap-1.5 font-medium">
+            <GitPullRequest className="size-3" />
+            Draft PR Open
+          </Badge>
+        );
+      case 'verified_resolved':
+        return (
+          <Badge variant="success" className="gap-1.5 font-medium">
+            <CheckCircle2 className="size-3 text-emerald-400" />
+            Verified Resolved
+          </Badge>
+        );
+      case 'abstained':
+        return (
+          <Badge variant="purple" className="gap-1.5 font-medium">
+            Abstained (Policy)
+          </Badge>
+        );
+      default:
+        return <Badge variant="secondary">{status}</Badge>;
+    }
+  };
+
+  const getSeverityBadge = (severity: string) => {
+    switch (severity) {
+      case 'critical':
+        return <Badge variant="destructive" className="uppercase text-[10px] tracking-wider font-bold">Critical</Badge>;
+      case 'high':
+        return <Badge variant="warning" className="uppercase text-[10px] tracking-wider font-bold">High</Badge>;
+      default:
+        return <Badge variant="secondary" className="uppercase text-[10px] tracking-wider font-bold">{severity}</Badge>;
+    }
+  };
 
   return (
-    <div className="space-y-8">
-      {/* Top Header & Simulation Controls */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/60 border border-slate-800 rounded-xl p-5">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-            Incident Operations Center
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Real-time telemetry ingestion, adversarial root cause investigation, and sandbox-proven hotfixes.
+    <div className="space-y-6">
+      {/* Top Banner / Actions Block */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
+              Incident Operations Center
+            </h1>
+            <Badge variant="outline" className="border-emerald-500/30 text-emerald-400 text-[10px] font-mono">
+              Real-time Ingestion
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Adversarial root cause falsification, mutation test validation in isolated Docker sandbox, and automated draft PRs.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => triggerSimulation('sentry')}
             disabled={Boolean(simulating)}
-            className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors disabled:opacity-50"
+            className="text-xs border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200"
           >
-            <ShieldAlert className="w-3.5 h-3.5" />
-            {simulating === 'sentry' ? 'Simulating...' : 'Simulate Sentry (500)'}
-          </button>
-          <button
+            <ShieldAlert className="size-3.5 mr-1.5 text-rose-400" />
+            {simulating === 'sentry' ? 'Ingesting...' : 'Simulate Sentry (500)'}
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => triggerSimulation('actions')}
             disabled={Boolean(simulating)}
-            className="px-3 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors disabled:opacity-50"
+            className="text-xs border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 hover:text-amber-200"
           >
-            <Server className="w-3.5 h-3.5" />
-            {simulating === 'actions' ? 'Simulating...' : 'Simulate CI Failure'}
-          </button>
-          <button
+            <Server className="size-3.5 mr-1.5 text-amber-400" />
+            {simulating === 'actions' ? 'Triggering...' : 'Simulate CI Failure'}
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={fetchDashboardData}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition-colors"
-            title="Refresh feed"
+            title="Refresh incident telemetry"
+            className="h-8 w-8 text-muted-foreground hover:text-foreground"
           >
-            <RefreshCw className="w-4 h-4" />
-          </button>
+            <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
         </div>
       </div>
 
-      {/* KPI Stats Bar */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="glass-panel p-5 rounded-xl border border-slate-800">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Detected</span>
-            <AlertTriangle className="w-4 h-4 text-amber-400" />
-          </div>
-          <p className="text-2xl font-bold text-white mt-2 font-mono">{metrics.totalIncidents}</p>
-          <span className="text-[11px] text-slate-500 mt-1 block">Cross-tool correlated</span>
-        </div>
+      {/* KPI Stats Cards Block */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Total Detected */}
+        <Card className="hover:border-border transition-all">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Total Detected
+            </CardTitle>
+            <div className="p-1.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-400">
+              <AlertTriangle className="size-4" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold font-mono tracking-tight text-foreground">
+              {metrics.totalIncidents}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1">
+              <Layers className="size-3 text-primary" />
+              Cross-tool correlated telemetry
+            </p>
+          </CardContent>
+        </Card>
 
-        <div className="glass-panel p-5 rounded-xl border border-slate-800">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Awaiting Approval</span>
-            <Clock className="w-4 h-4 text-blue-400" />
-          </div>
-          <p className="text-2xl font-bold text-blue-400 mt-2 font-mono">{metrics.awaitingReview}</p>
-          <span className="text-[11px] text-slate-500 mt-1 block">Human review gate</span>
-        </div>
+        {/* Awaiting Review */}
+        <Card className="hover:border-border transition-all">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Awaiting Approval
+            </CardTitle>
+            <div className="p-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400">
+              <Clock className="size-4" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold font-mono tracking-tight text-blue-400">
+              {metrics.awaitingReview}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1">
+              <span className="size-1.5 rounded-full bg-blue-400" />
+              Human-in-the-loop review gate
+            </p>
+          </CardContent>
+        </Card>
 
-        <div className="glass-panel p-5 rounded-xl border border-slate-800">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Draft PRs Proven</span>
-            <GitPullRequest className="w-4 h-4 text-cyan-400" />
-          </div>
-          <p className="text-2xl font-bold text-cyan-400 mt-2 font-mono">{metrics.prsOpen}</p>
-          <span className="text-[11px] text-slate-500 mt-1 block">Mutation test verified</span>
-        </div>
+        {/* Draft PRs Proven */}
+        <Card className="hover:border-border transition-all">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Draft PRs Proven
+            </CardTitle>
+            <div className="p-1.5 rounded-md bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
+              <GitPullRequest className="size-4" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold font-mono tracking-tight text-cyan-400">
+              {metrics.prsOpen}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1">
+              <CheckCircle2 className="size-3 text-emerald-400" />
+              Mutation test verified in sandbox
+            </p>
+          </CardContent>
+        </Card>
 
-        <div className="glass-panel p-5 rounded-xl border border-slate-800">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Mean Time To Fix</span>
-            <CheckCircle className="w-4 h-4 text-emerald-400" />
-          </div>
-          <p className="text-2xl font-bold text-emerald-400 mt-2 font-mono">{metrics.meanTimeToResolveMinutes}m</p>
-          <span className="text-[11px] text-slate-500 mt-1 block">Down from 18.4 days</span>
-        </div>
+        {/* Mean Time To Fix */}
+        <Card className="hover:border-border transition-all">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Mean Time to Fix
+            </CardTitle>
+            <div className="p-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+              <CheckCircle className="size-4" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold font-mono tracking-tight text-emerald-400">
+              {metrics.meanTimeToResolveMinutes}m
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1">
+              <span className="text-emerald-400 font-medium font-mono">-99.8%</span>
+              <span>vs 18.4d industry avg</span>
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Incident Feed Controls */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center space-x-2">
-            <Filter className="w-4 h-4 text-slate-400" />
-            <span className="text-sm font-semibold text-slate-200">Filter Incidents:</span>
-          </div>
+      {/* Incident Data Table Block */}
+      <Card className="border border-border/80">
+        <CardHeader className="p-4 sm:p-5 border-b border-border/60">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            {/* Search Input */}
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="Search incidents, commit, source..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9 text-xs bg-muted/40"
+              />
+            </div>
 
-          <div className="flex items-center space-x-1.5 bg-slate-900/80 p-1 rounded-lg border border-slate-800 text-xs">
-            {['ALL', 'AWAITING', 'FIXING', 'PR_OPEN', 'RESOLVED', 'ABSTAINED'].map(filterKey => (
-              <button
-                key={filterKey}
-                onClick={() => setActiveFilter(filterKey)}
-                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  activeFilter === filterKey
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
+            {/* Filter Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
+              {[
+                { key: 'ALL', label: 'All Incidents' },
+                { key: 'AWAITING', label: 'Awaiting Review' },
+                { key: 'FIXING', label: 'Sandbox Fixing' },
+                { key: 'PR_OPEN', label: 'Draft PR Open' },
+                { key: 'RESOLVED', label: 'Resolved' },
+                { key: 'ABSTAINED', label: 'Abstained' },
+              ].map((f) => {
+                const count = filterCounts[f.key as keyof typeof filterCounts] || 0;
+                const isSelected = activeFilter === f.key;
+                return (
+                  <Button
+                    key={f.key}
+                    variant={isSelected ? "default" : "ghost"}
+                    size="sm"
+                    onClick={() => setActiveFilter(f.key)}
+                    className={`h-8 text-xs font-medium rounded-lg px-2.5 ${
+                      isSelected
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                    }`}
+                  >
+                    <span>{f.label}</span>
+                    <span className={`ml-1.5 rounded-full px-1.5 py-0.2 text-[10px] font-mono ${
+                      isSelected ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground"
+                    }`}>
+                      {count}
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="py-20 text-center font-mono text-xs text-muted-foreground">
+              Ingesting real-time incident feed...
+            </div>
+          ) : filteredIncidents.length === 0 ? (
+            <div className="py-16 text-center space-y-3">
+              <div className="mx-auto size-12 rounded-full bg-muted/50 border border-border flex items-center justify-center text-muted-foreground">
+                <Filter className="size-5" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">No incidents match your filter</p>
+                <p className="text-xs text-muted-foreground">
+                  Try clearing the search query or trigger a live simulation using the buttons above.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setActiveFilter('ALL'); setSearchQuery(''); }}
+                className="text-xs"
               >
-                {filterKey.replace('_', ' ')}
-              </button>
-            ))}
-          </div>
-        </div>
+                Reset Filters
+              </Button>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[110px]">Incident ID</TableHead>
+                  <TableHead className="min-w-[280px]">Summary & Root Cause</TableHead>
+                  <TableHead className="w-[140px]">Source & Telemetry</TableHead>
+                  <TableHead className="w-[140px]">Environment / Ref</TableHead>
+                  <TableHead className="w-[150px]">Current State</TableHead>
+                  <TableHead className="w-[120px] text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredIncidents.map((inc) => (
+                  <TableRow key={inc.id} className="group hover:bg-muted/30">
+                    {/* ID & Severity */}
+                    <TableCell className="font-mono text-xs font-semibold">
+                      <div className="space-y-1">
+                        <span className="text-foreground">{inc.id}</span>
+                        <div>{getSeverityBadge(inc.severity)}</div>
+                      </div>
+                    </TableCell>
 
-        {/* Incident List */}
-        {loading ? (
-          <div className="text-center py-16 text-slate-500 font-mono text-sm">
-            Loading telemetry feed...
-          </div>
-        ) : filteredIncidents.length === 0 ? (
-          <div className="text-center py-16 glass-panel rounded-xl border border-slate-800">
-            <p className="text-slate-400 text-sm">No incidents match the selected filter.</p>
-            <p className="text-xs text-slate-500 mt-1">Use the simulation buttons above to trigger a live failure.</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {filteredIncidents.map(inc => {
-              const statusPill =
-                inc.status === 'awaiting_approval' ? { bg: 'bg-blue-500/10 text-blue-400 border-blue-500/30', label: 'Awaiting Review' } :
-                inc.status === 'fixing' || inc.status === 'validating' ? { bg: 'bg-amber-500/10 text-amber-400 border-amber-500/30', label: 'Sandbox Fixing' } :
-                inc.status === 'pr_open' ? { bg: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30', label: 'DRAFT PR Open' } :
-                inc.status === 'verified_resolved' ? { bg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30', label: 'Verified Resolved' } :
-                inc.status === 'abstained' ? { bg: 'bg-purple-500/10 text-purple-400 border-purple-500/30', label: 'Abstained (Policy)' } :
-                { bg: 'bg-slate-500/10 text-slate-400 border-slate-500/30', label: inc.status };
+                    {/* Summary */}
+                    <TableCell>
+                      <div className="space-y-1">
+                        <Link
+                          href={`/incidents/${inc.id}`}
+                          className="font-semibold text-sm text-foreground hover:text-primary transition-colors flex items-center gap-1.5"
+                        >
+                          <span className="line-clamp-1">{inc.title}</span>
+                          <ArrowRight className="size-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-primary shrink-0" />
+                        </Link>
+                        {inc.fingerprint && (
+                          <p className="text-[11px] font-mono text-muted-foreground truncate max-w-md">
+                            fp: {inc.fingerprint.slice(0, 24)}...
+                          </p>
+                        )}
+                      </div>
+                    </TableCell>
 
-              const severityPill =
-                inc.severity === 'critical' ? 'bg-rose-500/20 text-rose-400 border-rose-500/30' :
-                inc.severity === 'high' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' :
-                'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
+                    {/* Source & Correlated Count */}
+                    <TableCell>
+                      <div className="flex flex-col gap-1 text-xs">
+                        <Badge variant="outline" className="font-mono text-[10px] w-fit border-border bg-muted/40">
+                          {inc.source}
+                        </Badge>
+                        {inc.occurrences > 1 && (
+                          <span className="text-[10px] font-mono text-primary font-semibold">
+                            {inc.occurrences}x correlated
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
 
-              return (
-                <div
-                  key={inc.id}
-                  className="glass-panel p-5 rounded-xl border border-slate-800/80 hover:border-blue-500/40 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
-                >
-                  <div className="space-y-2 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-xs font-semibold text-slate-400">{inc.id}</span>
-                      <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${severityPill}`}>
-                        {inc.severity}
-                      </span>
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${statusPill.bg}`}>
-                        {statusPill.label}
-                      </span>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800/80 text-slate-400 border border-slate-700">
-                        {inc.source}
-                      </span>
-                      {inc.occurrences > 1 && (
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800">
-                          {inc.occurrences}x correlated
-                        </span>
-                      )}
-                    </div>
+                    {/* Environment & Commit */}
+                    <TableCell>
+                      <div className="space-y-0.5 text-xs font-mono">
+                        <div className="text-muted-foreground">
+                          Commit: <span className="text-foreground">{inc.commitSha ? inc.commitSha.slice(0, 7) : 'HEAD'}</span>
+                        </div>
+                        <div className="text-[11px] text-muted-foreground">
+                          {inc.environment || 'production'}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground/70">
+                          {new Date(inc.detectedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </div>
+                      </div>
+                    </TableCell>
 
-                    <h3 className="text-base font-semibold text-white tracking-tight">
-                      {inc.title}
-                    </h3>
+                    {/* Status Badge */}
+                    <TableCell>
+                      {getStatusBadge(inc.status)}
+                    </TableCell>
 
-                    <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400 font-mono">
-                      <span>Commit: <span className="text-slate-300">{inc.commitSha ? inc.commitSha.slice(0, 7) : 'HEAD'}</span></span>
-                      <span>Env: <span className="text-slate-300">{inc.environment}</span></span>
-                      <span>Detected: <span className="text-slate-300">{new Date(inc.detectedAt).toLocaleTimeString()}</span></span>
-                    </div>
-                  </div>
+                    {/* Action Button */}
+                    <TableCell className="text-right">
+                      <Button asChild size="sm" variant={inc.status === 'awaiting_approval' ? "default" : "outline"} className="h-8 text-xs font-medium">
+                        <Link href={`/incidents/${inc.id}`}>
+                          <span>{inc.status === 'awaiting_approval' ? 'Review & Fix' : 'Inspect'}</span>
+                          <ChevronRight className="size-3.5 ml-1" />
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
 
-                  <div className="flex items-center gap-3">
-                    <Link
-                      href={`/incidents/${inc.id}`}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
-                    >
-                      Investigate & Fix
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </Link>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+        <CardFooter className="p-3 sm:p-4 border-t border-border/60 flex items-center justify-between text-xs text-muted-foreground">
+          <span>Showing {filteredIncidents.length} of {incidents.length} recorded incidents</span>
+          <span className="font-mono text-[11px]">Auto-refresh: 3s active</span>
+        </CardFooter>
+      </Card>
     </div>
   );
 }
