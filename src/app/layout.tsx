@@ -2,6 +2,7 @@
 import './globals.css';
 import Link from 'next/link';
 import { Shield, Activity, Terminal, Settings, CheckCircle2, Sliders, ExternalLink } from 'lucide-react';
+import { UserNav } from './components/UserNav';
 
 export const metadata = {
   title: 'PatchPilot — AI On-Call DevOps & Remediation Agent',
@@ -68,6 +69,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                 <span>Proactive Watchdog Active</span>
               </div>
+              <UserNav />
             </div>
           </div>
         </header>

@@ -192,3 +192,15 @@ export const evalRuns = sqliteTable('eval_runs', {
   averageTokens: integer('average_tokens').notNull(),
   resultsJson: text('results_json').notNull()
 });
+
+export const users = sqliteTable('users', {
+  id: text('id').primaryKey(),
+  googleId: text('google_id').notNull().unique(),
+  email: text('email').notNull().unique(),
+  name: text('name').notNull(),
+  avatarUrl: text('avatar_url'),
+  hostedDomain: text('hosted_domain'),
+  role: text('role').notNull().default('admin'),
+  createdAt: text('created_at').notNull(),
+  lastLoginAt: text('last_login_at').notNull()
+});
