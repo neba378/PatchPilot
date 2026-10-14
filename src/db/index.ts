@@ -211,6 +211,18 @@ export function initDb() {
       average_tokens INTEGER NOT NULL,
       results_json TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      google_id TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      avatar_url TEXT,
+      hosted_domain TEXT,
+      role TEXT NOT NULL DEFAULT 'admin',
+      created_at TEXT NOT NULL,
+      last_login_at TEXT NOT NULL
+    );
   `);
 }
 

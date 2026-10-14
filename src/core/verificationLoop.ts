@@ -1,11 +1,10 @@
-// src/core/verificationLoop.ts
 import { db } from '../db';
 import { incidents, pullRequests, memories } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import { logger } from './logger';
 import { generatePostmortem } from '../agents/postmortem';
 import { telegramAdapter } from '../adapters/channels/telegram';
-import { gitHubAdapter } from '../adapters/repohosts/github';
+import { gitHubAdapter, getGitHubAdapterForProject } from '../adapters/repohosts/github';
 
 export async function handlePrMerged(incidentId: string): Promise<void> {
   const incident = await db.select().from(incidents).where(eq(incidents.id, incidentId)).get();
@@ -50,8 +49,9 @@ export async function checkRecurrence(incidentId: string, errorReoccurred: boole
     // Open revert PR proposal
     const repo = incident.repo || 'nebiyu-org/checkout-api-service';
     const revertBranch = `patchpilot/revert-${incident.id.toLowerCase()}`;
-    await gitHubAdapter.createBranch(repo, 'main', revertBranch);
-    const revertPr = await gitHubAdapter.openDraftPr(repo, {
+    const repoHost = await getGitHubAdapterForProject(incident.projectId);
+    await repoHost.createBranch(repo, 'main', revertBranch);
+    const revertPr = await repoHost.openDraftPr(repo, {
       title: `[PatchPilot Revert] Revert fix for ${incident.id} due to reoccurring telemetry`,
       body: `## ⚠️ Recurrence Alert\n\nThe error fingerprint \`${incident.fingerprint}\` reoccurred after deployment.\nPatchPilot automatically proposes an emergency revert.`,
       head: revertBranch

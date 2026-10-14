@@ -1,8 +1,7 @@
-// src/core/sandboxFixPipeline.ts
 import { Incident, InvestigationOutput } from './schemas';
 import { policyEngine } from '../policy/engine';
 import { sandboxRegistry } from '../adapters/sandboxes/registry';
-import { gitHubAdapter } from '../adapters/repohosts/github';
+import { gitHubAdapter, getGitHubAdapterForProject } from '../adapters/repohosts/github';
 import { generateFixEdits } from '../agents/fixer';
 import { db } from '../db';
 import { fixAttempts, pullRequests, incidents } from '../db/schema';
@@ -49,11 +48,12 @@ export async function executeSandboxFix(
 
   const repo = process.env.TARGET_GITHUB_REPO || incident.repo || 'neba378/test';
   const commitRef = incident.commitSha || 'main';
+  const repoHost = await getGitHubAdapterForProject(incident.projectId);
   const providerType = process.env.SANDBOX_PROVIDER || 'local-docker';
   const provider = sandboxRegistry.get(providerType);
 
   // 2. Fetch repo snapshot (no GitHub token ever enters sandbox!)
-  const files = await gitHubAdapter.getSnapshot(repo, commitRef);
+  const files = await repoHost.getSnapshot(repo, commitRef);
   const sandbox = await provider.create({ files });
 
   let diffResult = '';
@@ -130,14 +130,14 @@ export async function executeSandboxFix(
 
     // 9. Open DRAFT PR with full proof attached
     const branchName = `patchpilot/fix-${incident.id.toLowerCase()}`;
-    await gitHubAdapter.createBranch(repo, commitRef, branchName);
+    await repoHost.createBranch(repo, commitRef, branchName);
 
     const changedFiles: Record<string, string> = {
       [targetFile]: patchedContent,
       [regressionTestPath]: regressionTestCode
     };
 
-    await gitHubAdapter.commitFiles(
+    await repoHost.commitFiles(
       repo,
       branchName,
       changedFiles,
@@ -171,7 +171,7 @@ git revert -m 1 <merge-commit-sha>
 *Created automatically by PatchPilot Autonomous DevSecOps Agent for Incident [${incident.id}](${process.env.APP_URL || 'http://localhost:3000'}/incidents/${incident.id})*
 `.trim();
 
-    const pr = await gitHubAdapter.openDraftPr(repo, {
+    const pr = await repoHost.openDraftPr(repo, {
       title: `[PatchPilot Fix] ${incident.title}`,
       body: prBody,
       head: branchName
