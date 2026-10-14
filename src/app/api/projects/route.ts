@@ -35,6 +35,9 @@ export async function POST(req: NextRequest) {
       repoName,
       defaultBranch = 'main',
       githubToken,
+      aiProvider = 'gemini',
+      aiModel,
+      aiApiKey,
       geminiApiKey,
       sentrySecret,
       sentryOrg,
@@ -93,13 +96,18 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (geminiApiKey) {
+    const effectiveAiKey = aiApiKey || geminiApiKey;
+    if (effectiveAiKey) {
+      const chosenProvider = aiProvider || 'gemini';
       connList.push({
-        id: `conn_gemini_${Date.now().toString(36)}`,
+        id: `conn_${chosenProvider}_${Date.now().toString(36)}`,
         projectId,
-        type: 'gemini',
-        encryptedSecret: geminiApiKey,
-        metadata: JSON.stringify({ model: 'gemini-2.5-flash' }),
+        type: chosenProvider,
+        encryptedSecret: effectiveAiKey,
+        metadata: JSON.stringify({
+          provider: chosenProvider,
+          model: aiModel || (chosenProvider === 'openai' ? 'gpt-4o-mini' : chosenProvider === 'anthropic' ? 'claude-3-5-sonnet-20241022' : 'gemini-flash-latest')
+        }),
         createdAt: now
       });
     }

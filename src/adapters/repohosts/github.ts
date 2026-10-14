@@ -154,17 +154,24 @@ export class GitHubAdapter implements RepoHostAdapter {
     if (!this.octokit) throw new Error('GitHub client not initialized');
     const { owner, repoName } = this.parseRepo(repo);
 
-    logger.info({ repo, sha }, '[GitHubAdapter] Fetching commit diff');
-    const res = await this.octokit.rest.repos.getCommit({
-      owner,
-      repo: repoName,
-      ref: sha,
-      headers: {
-        accept: 'application/vnd.github.v3.diff'
-      }
-    });
+    const targetSha = (!sha || sha.toLowerCase() === 'head') ? (ref || 'main') : sha;
+    logger.info({ repo, sha: targetSha }, '[GitHubAdapter] Fetching commit diff');
 
-    return typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+    try {
+      const res = await this.octokit.rest.repos.getCommit({
+        owner,
+        repo: repoName,
+        ref: targetSha,
+        headers: {
+          accept: 'application/vnd.github.v3.diff'
+        }
+      });
+
+      return typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+    } catch (err: any) {
+      logger.warn({ error: err.message, targetSha }, '[GitHubAdapter] Could not fetch commit diff; returning empty diff');
+      return '';
+    }
   }
 
   async createBranch(repo: string, baseShaOrBranch: string, branchName: string): Promise<void> {

@@ -3,23 +3,20 @@ import { InvestigationContext } from '../core/contextBuilder';
 import { InvestigationOutput, InvestigationOutputSchema } from '../core/schemas';
 import { geminiRateLimiter } from './rateLimiter';
 import { logger } from '../core/logger';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { getLanguageModel } from './provider';
 import { generateObject } from 'ai';
 
 export async function runInvestigation(ctx: InvestigationContext): Promise<InvestigationOutput> {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  const { model, provider, modelName } = await getLanguageModel({ projectId: ctx.incident.projectId });
 
-  if (apiKey && apiKey.trim() !== '') {
+  if (provider === 'gemini') {
     const allowed = await geminiRateLimiter.acquire();
     if (!allowed) {
       throw new Error('Gemini API rate limit reached (10 RPM / 250 RPD limit). Please wait for token bucket refill.');
     }
+  }
 
-    const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-    logger.info({ model: modelName }, '[Investigator] Calling real Google Gemini API via Vercel AI SDK');
-
-    const google = createGoogleGenerativeAI({ apiKey });
-    const model = google(modelName);
+  logger.info({ provider, model: modelName }, '[Investigator] Calling AI model via Vercel AI SDK');
 
     const prompt = `
 You are PatchPilot, an expert Autonomous SRE and Incident Investigation Agent.
@@ -65,10 +62,7 @@ ${ctx.scrubbedLogs}
 
       return result.object;
     } catch (err: any) {
-      logger.error({ error: err.message }, '[Investigator] Gemini API call failed');
-      throw new Error(`Google Gemini API execution failed: ${err.message}`);
+      logger.error({ error: err.message }, '[Investigator] AI SDK model call failed');
+      throw new Error(`AI model investigation execution failed: ${err.message}`);
     }
-  }
-
-  throw new Error('GEMINI_API_KEY is not configured in .env. Please provide your Google AI Studio Gemini API key.');
 }

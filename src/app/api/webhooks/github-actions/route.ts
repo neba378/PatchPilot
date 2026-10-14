@@ -23,8 +23,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid HMAC signature' }, { status: 401 });
     }
 
+    const queryProj = req.nextUrl.searchParams.get('projectId');
+    const dbProjects = await db.select().from(projects);
+    const activeProject = (queryProj ? dbProjects.find(p => p.id === queryProj) : null) || dbProjects.find(p => p.repoName === 'test') || dbProjects[0];
+    const targetProjectId = activeProject?.id || 'proj_main';
+
     const payload = JSON.parse(rawBody || '{}');
-    const parsedInputs = adapter.parse(payload, 'proj_main');
+    const parsedInputs = adapter.parse(payload, targetProjectId);
 
     for (const input of parsedInputs) {
       const { incident, isNew } = await correlateAndIngestSignal(input);

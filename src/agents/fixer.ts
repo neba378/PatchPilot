@@ -1,28 +1,26 @@
 // src/agents/fixer.ts
 import { InvestigationOutput, FixOutput, FixOutputSchema } from '../core/schemas';
 import { logger } from '../core/logger';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { getLanguageModel } from './provider';
 import { generateObject } from 'ai';
 import { geminiRateLimiter } from './rateLimiter';
 
 export async function generateFixEdits(
   investigation: InvestigationOutput,
   fileContent: string,
-  targetFilePath: string
+  targetFilePath: string,
+  options: { projectId?: string } = {}
 ): Promise<FixOutput> {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  const { model, provider, modelName } = await getLanguageModel({ projectId: options.projectId });
 
-  if (apiKey && apiKey.trim() !== '') {
+  if (provider === 'gemini') {
     const allowed = await geminiRateLimiter.acquire();
     if (!allowed) {
       throw new Error('Gemini API rate limit reached (10 RPM / 250 RPD limit).');
     }
+  }
 
-    const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-    logger.info({ model: modelName, file: targetFilePath }, '[FixerAgent] Calling real Google Gemini API to synthesize patch');
-
-    const google = createGoogleGenerativeAI({ apiKey });
-    const model = google(modelName);
+  logger.info({ provider, model: modelName, file: targetFilePath }, '[FixerAgent] Calling AI model via Vercel AI SDK to synthesize patch');
 
     const prompt = `
 You are PatchPilot, an expert Autonomous Code Repair Engineer.
@@ -53,13 +51,10 @@ ${fileContent}
         prompt
       });
 
-      logger.info({ explanation: res.object.explanation }, '[FixerAgent] Real Gemini patch synthesis complete');
+      logger.info({ explanation: res.object.explanation }, '[FixerAgent] AI SDK patch synthesis complete');
       return res.object;
     } catch (err: any) {
-      logger.error({ error: err.message }, '[FixerAgent] Gemini API patch synthesis failed');
-      throw new Error(`Google Gemini API patch synthesis failed: ${err.message}`);
+      logger.error({ error: err.message }, '[FixerAgent] AI SDK patch synthesis failed');
+      throw new Error(`AI model patch synthesis failed: ${err.message}`);
     }
-  }
-
-  throw new Error('GEMINI_API_KEY is not configured in .env. Please provide your Google AI Studio Gemini API key.');
 }

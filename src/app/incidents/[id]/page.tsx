@@ -16,7 +16,8 @@ import {
   ExternalLink,
   AlertTriangle,
   Play,
-  RotateCcw
+  RotateCcw,
+  Sparkles
 } from 'lucide-react';
 
 export default function IncidentDetailPage() {
@@ -51,7 +52,7 @@ export default function IncidentDetailPage() {
   const handleAction = async (action: 'accept' | 'reject' | 'snooze') => {
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/incidents/${id}/action`, {
+      await fetch(`/api/incidents/${id}/action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action })
@@ -66,7 +67,7 @@ export default function IncidentDetailPage() {
 
   if (loading) {
     return (
-      <div className="py-20 text-center font-mono text-sm text-slate-400">
+      <div className="py-20 text-center font-mono text-xs text-slate-400">
         Loading incident details...
       </div>
     );
@@ -75,8 +76,8 @@ export default function IncidentDetailPage() {
   if (!incidentData || !incidentData.incident) {
     return (
       <div className="py-20 text-center">
-        <p className="text-slate-400">Incident not found.</p>
-        <Link href="/" className="mt-4 inline-block text-blue-400 hover:underline text-sm">
+        <p className="text-slate-500 font-semibold">Incident not found.</p>
+        <Link href="/" className="mt-3 inline-block text-blue-600 font-bold hover:underline text-xs">
           Return to Dashboard
         </Link>
       </div>
@@ -95,10 +96,10 @@ export default function IncidentDetailPage() {
       <div className="flex items-center justify-between">
         <Link
           href="/"
-          className="text-xs font-medium text-slate-400 hover:text-white flex items-center gap-1.5 transition-colors"
+          className="text-xs font-semibold text-slate-500 hover:text-blue-600 flex items-center gap-1.5 transition-colors"
         >
-          <ArrowLeft className="w-4 h-4" />
-          Back to Incident Feed
+          <ArrowLeft className="w-3.5 h-3.5" />
+          Back to Incident Board
         </Link>
 
         {pullRequest && (
@@ -106,7 +107,7 @@ export default function IncidentDetailPage() {
             href={pullRequest.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="px-3 py-1.5 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
+            className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors"
           >
             <GitPullRequest className="w-3.5 h-3.5" />
             View Draft PR #{pullRequest.prNumber} on GitHub
@@ -116,22 +117,22 @@ export default function IncidentDetailPage() {
       </div>
 
       {/* Incident Header Card */}
-      <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4">
+      <div className="kanban-card p-6 rounded-2xl bg-white border border-slate-200/90 space-y-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-xs font-bold text-slate-400">{incident.id}</span>
-              <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30">
+              <span className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-[#ffebee] text-[#c62828] border border-[#ffcdd2]">
                 {incident.severity}
               </span>
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/30">
-                {incident.status.toUpperCase()}
+              <span className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                {incident.status}
               </span>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
                 {incident.source}
               </span>
             </div>
-            <h1 className="text-xl font-bold text-white tracking-tight">{incident.title}</h1>
+            <h1 className="text-lg md:text-xl font-bold text-slate-800 tracking-tight">{incident.title}</h1>
           </div>
 
           {/* Action Buttons (Human-in-the-Loop) */}
@@ -141,7 +142,7 @@ export default function IncidentDetailPage() {
                 <button
                   onClick={() => handleAction('accept')}
                   disabled={actionLoading}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-600/20 transition-colors disabled:opacity-50"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
                 >
                   <Play className="w-3.5 h-3.5 fill-current" />
                   {actionLoading ? 'Executing Sandbox Fix...' : 'Accept & Patch'}
@@ -149,14 +150,14 @@ export default function IncidentDetailPage() {
                 <button
                   onClick={() => handleAction('reject')}
                   disabled={actionLoading}
-                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition-colors"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full text-xs font-semibold transition-colors"
                 >
                   Reject
                 </button>
                 <button
                   onClick={() => handleAction('snooze')}
                   disabled={actionLoading}
-                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition-colors"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full text-xs font-semibold transition-colors"
                 >
                   Snooze
                 </button>
@@ -166,28 +167,28 @@ export default function IncidentDetailPage() {
         </div>
 
         {/* Telemetry metadata grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-3 border-t border-slate-800/80 text-xs font-mono text-slate-400">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-3 border-t border-slate-100 text-xs font-mono text-slate-500">
           <div>
-            <span className="text-slate-500 block">Commit SHA:</span>
-            <span className="text-slate-200">{incident.commitSha?.slice(0, 7) || 'HEAD'}</span>
+            <span className="text-slate-400 block text-[11px]">Commit SHA:</span>
+            <span className="text-slate-800 font-bold">{incident.commitSha?.slice(0, 7) || 'HEAD'}</span>
           </div>
           <div>
-            <span className="text-slate-500 block">Occurrences:</span>
-            <span className="text-slate-200">{incident.occurrences} (Correlated)</span>
+            <span className="text-slate-400 block text-[11px]">Occurrences:</span>
+            <span className="text-slate-800 font-bold">{incident.occurrences} (Correlated)</span>
           </div>
           <div>
-            <span className="text-slate-500 block">Fingerprint:</span>
-            <span className="text-slate-200 truncate block">{incident.fingerprint?.slice(0, 16)}...</span>
+            <span className="text-slate-400 block text-[11px]">Fingerprint:</span>
+            <span className="text-slate-800 font-bold truncate block">{incident.fingerprint?.slice(0, 16)}...</span>
           </div>
           <div>
-            <span className="text-slate-500 block">Detected:</span>
-            <span className="text-slate-200">{new Date(incident.detectedAt).toLocaleString()}</span>
+            <span className="text-slate-400 block text-[11px]">Detected:</span>
+            <span className="text-slate-800 font-bold">{new Date(incident.detectedAt).toLocaleTimeString()}</span>
           </div>
         </div>
       </div>
 
       {/* Tabs Bar */}
-      <div className="border-b border-slate-800 flex space-x-4">
+      <div className="border-b border-slate-200 flex space-x-4 overflow-x-auto">
         {[
           { key: 'reasoning', label: '🧠 Competing Hypotheses' },
           { key: 'diff', label: '📄 Interactive Git Diff' },
@@ -198,10 +199,10 @@ export default function IncidentDetailPage() {
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key as any)}
-            className={`pb-3 text-xs font-semibold tracking-wide border-b-2 transition-colors ${
+            className={`pb-3 text-xs font-bold tracking-wide border-b-2 transition-all shrink-0 ${
               activeTab === tab.key
-                ? 'border-blue-500 text-blue-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-400 hover:text-slate-700'
             }`}
           >
             {tab.label}
@@ -212,50 +213,50 @@ export default function IncidentDetailPage() {
       {/* Tab 1: Competing Hypotheses & Falsification Reasoning */}
       {activeTab === 'reasoning' && (
         <div className="space-y-4">
-          <div className="glass-panel p-4 rounded-xl border border-blue-500/20 bg-blue-500/5">
-            <h4 className="text-xs font-bold text-blue-300 uppercase tracking-wider flex items-center gap-1.5">
-              <Shield className="w-4 h-4" />
+          <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-200/60">
+            <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider flex items-center gap-1.5">
+              <Shield className="w-4 h-4 text-blue-600" />
               Investigation by Falsification Protocol
             </h4>
-            <p className="text-xs text-slate-300 mt-1">
+            <p className="text-xs text-slate-600 mt-1">
               PatchPilot formulates competing theories and actively attempts to rule each one out before recommending a remediation path.
             </p>
           </div>
 
           <div className="space-y-3">
             {hypotheses.length === 0 ? (
-              <p className="text-sm text-slate-400 py-6 text-center">Investigation in progress...</p>
+              <p className="text-xs text-slate-400 py-6 text-center">Investigation in progress...</p>
             ) : (
               hypotheses.map((h: any, idx: number) => {
                 const isLeading = h.status === 'leading';
                 return (
                   <div
                     key={idx}
-                    className={`glass-panel p-5 rounded-xl border transition-all ${
-                      isLeading ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-slate-800 opacity-70'
+                    className={`kanban-card p-5 rounded-2xl border transition-all ${
+                      isLeading ? 'border-emerald-300 bg-emerald-50/30' : 'border-slate-200 bg-white opacity-85'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase ${
-                          isLeading ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                        <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border uppercase ${
+                          isLeading ? 'bg-[#e8f5e9] text-[#2e7d32] border-[#c8e6c9]' : 'bg-[#ffebee] text-[#c62828] border-[#ffcdd2]'
                         }`}>
                           {h.status === 'leading' ? '⭐ Leading Hypothesis' : '❌ Ruled Out by Evidence'}
                         </span>
-                        <span className="text-xs font-mono text-slate-400">Confidence: {Math.round(h.confidence * 100)}%</span>
+                        <span className="text-xs font-mono text-slate-500 font-semibold">Confidence: {Math.round(h.confidence * 100)}%</span>
                       </div>
                     </div>
 
-                    <h4 className="text-sm font-semibold text-white">{h.statement}</h4>
+                    <h4 className="text-xs font-bold text-slate-800">{h.statement}</h4>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 text-xs">
-                      <div className="p-3 bg-slate-900/60 rounded-lg border border-slate-800">
-                        <span className="text-slate-400 font-semibold block mb-1">Supporting Evidence:</span>
-                        <p className="text-slate-300">{h.supportingEvidence}</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3 text-xs">
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70">
+                        <span className="text-slate-500 font-bold block mb-1">Supporting Evidence:</span>
+                        <p className="text-slate-700">{h.supportingEvidence}</p>
                       </div>
-                      <div className="p-3 bg-slate-900/60 rounded-lg border border-slate-800">
-                        <span className="text-slate-400 font-semibold block mb-1">Disproving Evidence Tested:</span>
-                        <p className="text-slate-300">{h.counterEvidence || 'None found (stood up to falsification)'}</p>
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70">
+                        <span className="text-slate-500 font-bold block mb-1">Disproving Evidence Tested:</span>
+                        <p className="text-slate-700">{h.counterEvidence || 'None found (stood up to falsification)'}</p>
                       </div>
                     </div>
                   </div>
@@ -268,29 +269,29 @@ export default function IncidentDetailPage() {
 
       {/* Tab 2: Interactive Side-by-Side Git Diff Viewer */}
       {activeTab === 'diff' && (
-        <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4">
+        <div className="kanban-card p-6 rounded-2xl bg-white border border-slate-200/90 space-y-4 shadow-sm">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <FileCode className="w-4 h-4 text-cyan-400" />
+            <h3 className="text-xs font-bold text-slate-800 flex items-center gap-2">
+              <FileCode className="w-4 h-4 text-blue-600" />
               Unified Patch Diff (Minimal Change Proof)
             </h3>
-            <span className="text-xs font-mono text-slate-400">Target: src/controllers/paymentController.ts</span>
+            <span className="text-xs font-mono text-slate-500">Target: src/controllers/paymentController.ts</span>
           </div>
 
           {fixAttempt?.diff ? (
-            <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 font-mono text-xs overflow-x-auto space-y-1">
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 font-mono text-xs overflow-x-auto space-y-1">
               {fixAttempt.diff.split('\n').map((line: string, i: number) => {
                 const isAdd = line.startsWith('+') && !line.startsWith('+++');
                 const isDel = line.startsWith('-') && !line.startsWith('---');
                 return (
-                  <div key={i} className={`px-2 py-0.5 rounded ${isAdd ? 'diff-add' : isDel ? 'diff-del' : 'diff-ctx'}`}>
+                  <div key={i} className={`px-2 py-0.5 rounded ${isAdd ? 'diff-add font-medium' : isDel ? 'diff-del font-medium' : 'diff-ctx'}`}>
                     {line}
                   </div>
                 );
               })}
             </div>
           ) : (
-            <div className="text-center py-12 text-slate-500 text-sm">
+            <div className="text-center py-12 text-slate-400 text-xs">
               Patch diff will appear after clicking &apos;Accept & Patch&apos;.
             </div>
           )}
@@ -300,36 +301,36 @@ export default function IncidentDetailPage() {
       {/* Tab 3: Sandbox Validation & Mutation Test */}
       {activeTab === 'sandbox' && (
         <div className="space-y-4">
-          <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          <div className="kanban-card p-6 rounded-2xl bg-white border border-slate-200/90 space-y-4 shadow-sm">
+            <h3 className="text-xs font-bold text-slate-800 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
               Sandbox Reproduction & Mutation Check
             </h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-              <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800">
-                <span className="text-slate-400 block mb-1">Pre-Patch Reproduction:</span>
-                <span className="text-rose-400 font-bold block text-sm">❌ FAILED (500 Error reproduced)</span>
-                <p className="text-[11px] text-slate-500 mt-1">Confirmed failure on original unpatched commit.</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <span className="text-slate-500 block mb-1">Pre-Patch Reproduction:</span>
+                <span className="text-rose-600 font-bold block text-sm">❌ FAILED (500 Error reproduced)</span>
+                <p className="text-[11px] text-slate-400 mt-1">Confirmed failure on original unpatched commit.</p>
               </div>
 
-              <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800">
-                <span className="text-slate-400 block mb-1">Mutation Test Pass:</span>
-                <span className="text-emerald-400 font-bold block text-sm">✅ PASSED (2/2 tests passed)</span>
-                <p className="text-[11px] text-slate-500 mt-1">Proves newly authored regression test passes on patch.</p>
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <span className="text-slate-500 block mb-1">Mutation Test Pass:</span>
+                <span className="text-emerald-600 font-bold block text-sm">✅ PASSED (2/2 tests passed)</span>
+                <p className="text-[11px] text-slate-400 mt-1">Proves newly authored regression test passes on patch.</p>
               </div>
 
-              <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800">
-                <span className="text-slate-400 block mb-1">Linter & TypeScript:</span>
-                <span className="text-cyan-400 font-bold block text-sm">✅ Clean (0 errors)</span>
-                <p className="text-[11px] text-slate-500 mt-1">No syntax errors, regressions, or type breakages.</p>
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <span className="text-slate-500 block mb-1">Linter & TypeScript:</span>
+                <span className="text-blue-600 font-bold block text-sm">✅ Clean (0 errors)</span>
+                <p className="text-[11px] text-slate-400 mt-1">No syntax errors, regressions, or type breakages.</p>
               </div>
             </div>
 
             {fixAttempt?.regressionTestCode && (
               <div className="mt-4 space-y-2">
-                <span className="text-xs font-semibold text-slate-300 block">Authored Regression Test:</span>
-                <pre className="p-4 bg-slate-950 rounded-lg border border-slate-800 text-xs font-mono text-emerald-400 overflow-x-auto">
+                <span className="text-xs font-bold text-slate-700 block">Authored Regression Test:</span>
+                <pre className="p-4 bg-slate-900 rounded-xl border border-slate-800 text-xs font-mono text-emerald-400 overflow-x-auto">
                   {fixAttempt.regressionTestCode}
                 </pre>
               </div>
@@ -340,12 +341,12 @@ export default function IncidentDetailPage() {
 
       {/* Tab 4: Logs */}
       {activeTab === 'logs' && (
-        <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-3">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-slate-400" />
+        <div className="kanban-card p-6 rounded-2xl bg-white border border-slate-200/90 space-y-3 shadow-sm">
+          <h3 className="text-xs font-bold text-slate-800 flex items-center gap-2">
+            <Terminal className="w-4 h-4 text-slate-500" />
             Scrubbed Exception Telemetry
           </h3>
-          <pre className="p-4 bg-slate-950 rounded-lg border border-slate-800 font-mono text-xs text-slate-300 overflow-x-auto whitespace-pre-wrap">
+          <pre className="p-4 bg-slate-900 rounded-xl border border-slate-800 font-mono text-xs text-slate-200 overflow-x-auto whitespace-pre-wrap">
             {incident.logExcerpt || incident.errorMessage || 'No logs recorded.'}
           </pre>
         </div>
@@ -353,10 +354,10 @@ export default function IncidentDetailPage() {
 
       {/* Tab 5: Postmortem */}
       {activeTab === 'postmortem' && (
-        <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-3">
-          <h3 className="text-sm font-bold text-white">Postmortem Markdown Documentation</h3>
+        <div className="kanban-card p-6 rounded-2xl bg-white border border-slate-200/90 space-y-3 shadow-sm">
+          <h3 className="text-xs font-bold text-slate-800">Postmortem Markdown Documentation</h3>
           {postmortem ? (
-            <pre className="p-4 bg-slate-950 rounded-lg border border-slate-800 font-mono text-xs text-slate-300 overflow-x-auto whitespace-pre-wrap">
+            <pre className="p-4 bg-slate-900 rounded-xl border border-slate-800 font-mono text-xs text-slate-200 overflow-x-auto whitespace-pre-wrap">
               {postmortem.markdown}
             </pre>
           ) : (
