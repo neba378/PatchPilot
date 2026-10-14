@@ -1,8 +1,21 @@
 // backend/src/routes/projects.ts
 import { Router, Request, Response } from 'express';
 import { db } from '@/db';
-import { projects, connections, policies } from '@/db/schema';
-import { desc } from 'drizzle-orm';
+import {
+  projects,
+  connections,
+  policies,
+  signals,
+  incidents,
+  investigations,
+  fixAttempts,
+  pullRequests,
+  postmortems,
+  messages,
+  chatLinks,
+  memories
+} from '@/db/schema';
+import { desc, eq } from 'drizzle-orm';
 import { decodeSessionCookie, GITHUB_SESSION_COOKIE_NAME } from '@/core/githubOAuth';
 import { logger } from '@/core/logger';
 
@@ -161,6 +174,48 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     logger.error({ error: err.message }, '[Projects] Create failed');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+projectsRouter.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+
+    const project = await db.select().from(projects).where(eq(projects.id, id)).get();
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Find all incident IDs for this project
+    const projectIncidents = await db.select({ id: incidents.id }).from(incidents).where(eq(incidents.projectId, id));
+    const incidentIds = projectIncidents.map(i => i.id);
+
+    for (const incId of incidentIds) {
+      await db.delete(investigations).where(eq(investigations.incidentId, incId));
+      await db.delete(fixAttempts).where(eq(fixAttempts.incidentId, incId));
+      await db.delete(pullRequests).where(eq(pullRequests.incidentId, incId));
+      await db.delete(postmortems).where(eq(postmortems.incidentId, incId));
+      await db.delete(messages).where(eq(messages.incidentId, incId));
+    }
+
+    // Delete incidents
+    await db.delete(incidents).where(eq(incidents.projectId, id));
+
+    // Delete project-level child records
+    await db.delete(connections).where(eq(connections.projectId, id));
+    await db.delete(policies).where(eq(policies.projectId, id));
+    await db.delete(signals).where(eq(signals.projectId, id));
+    await db.delete(chatLinks).where(eq(chatLinks.projectId, id));
+    await db.delete(memories).where(eq(memories.projectId, id));
+
+    // Delete project itself
+    await db.delete(projects).where(eq(projects.id, id));
+
+    logger.info({ projectId: id, name: project.name }, '[Projects] Project deleted successfully');
+    return res.json({ success: true, message: `Project ${project.name} deleted successfully` });
+  } catch (err: any) {
+    logger.error({ error: err.message }, '[Projects] Delete failed');
     return res.status(500).json({ error: err.message });
   }
 });

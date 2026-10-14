@@ -15,7 +15,8 @@ import {
   CheckCircle2,
   GitPullRequest,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  Trash2
 } from 'lucide-react';
 
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -119,6 +120,41 @@ export default function DashboardPage() {
         url.searchParams.delete('project');
       }
       window.history.pushState({}, '', url.toString());
+    }
+  };
+
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+
+  const handleDeleteProject = async (projectId: string, projectName: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    if (!window.confirm(`Are you sure you want to delete "${projectName}"? This will permanently remove the project and its incident history.`)) {
+      return;
+    }
+
+    setDeletingProjectId(projectId);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: 'DELETE',
+        headers: { 'Accept': 'application/json' }
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Failed to delete project');
+        return;
+      }
+
+      setProjects(prev => prev.filter(p => p.id !== projectId));
+      setIncidents(prev => prev.filter(i => i.projectId !== projectId));
+      if (selectedProjectId === projectId) {
+        selectProject(null);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Network error deleting project');
+    } finally {
+      setDeletingProjectId(null);
     }
   };
 
@@ -416,15 +452,27 @@ export default function DashboardPage() {
                           </a>
                         </div>
 
-                        {hasActive ? (
-                          <Badge variant="destructive" className="font-semibold text-[10px]">
-                            {pStats.active} Active Issue{pStats.active > 1 ? 's' : ''}
-                          </Badge>
-                        ) : (
-                          <Badge variant="success" className="font-semibold text-[10px]">
-                            Healthy
-                          </Badge>
-                        )}
+                        <div className="flex items-center gap-1.5">
+                          {hasActive ? (
+                            <Badge variant="destructive" className="font-semibold text-[10px]">
+                              {pStats.active} Active Issue{pStats.active > 1 ? 's' : ''}
+                            </Badge>
+                          ) : (
+                            <Badge variant="success" className="font-semibold text-[10px]">
+                              Healthy
+                            </Badge>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => handleDeleteProject(proj.id, proj.name, e)}
+                            disabled={deletingProjectId === proj.id}
+                            title="Delete project"
+                            className="size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 -mr-1 transition-colors"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
                       </div>
 
                       {/* Integrations Badges */}
@@ -536,6 +584,17 @@ export default function DashboardPage() {
                 >
                   <Server className="size-3.5 text-blue-400" />
                   <span>{simulating === 'actions' ? 'Triggering...' : 'Test CI'}</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => handleDeleteProject(selectedProject.id, selectedProject.name, e)}
+                  disabled={deletingProjectId === selectedProject.id}
+                  className="h-8 text-xs gap-1.5 border-border/80 text-muted-foreground hover:text-destructive hover:border-destructive/40"
+                  title="Delete this project"
+                >
+                  <Trash2 className="size-3.5 text-rose-400" />
+                  <span>{deletingProjectId === selectedProject.id ? 'Deleting...' : 'Delete Project'}</span>
                 </Button>
               </div>
             </div>
