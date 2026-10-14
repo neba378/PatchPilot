@@ -1,23 +1,50 @@
-// src/app/wizard/page.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  Shield,
-  CheckCircle,
-  Github,
-  MessageSquare,
+  FolderGit2,
+  Cpu,
   Terminal,
-  Sliders,
-  Play,
+  MessageSquare,
+  CheckCircle,
   Copy,
   Check,
-  Cpu,
-  Key,
-  FolderGit2,
-  ExternalLink
+  ExternalLink,
+  ArrowRight,
+  ArrowLeft,
+  Github,
+  RefreshCw,
+  LogOut,
+  Search,
+  Lock,
+  GitBranch
 } from 'lucide-react';
+
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+
+interface GitHubUser {
+  id?: number;
+  login: string;
+  name?: string;
+  avatarUrl?: string;
+  htmlUrl?: string;
+}
+
+interface GitHubRepo {
+  id: number;
+  name: string;
+  fullName: string;
+  owner: string;
+  defaultBranch: string;
+  private: boolean;
+  description: string | null;
+  htmlUrl: string;
+}
 
 export default function SetupWizardPage() {
   const router = useRouter();
@@ -26,13 +53,20 @@ export default function SetupWizardPage() {
   const [saving, setSaving] = useState(false);
   const [createdProject, setCreatedProject] = useState<any>(null);
 
+  // GitHub OAuth State
+  const [isGithubConnected, setIsGithubConnected] = useState(false);
+  const [githubUser, setGithubUser] = useState<GitHubUser | null>(null);
+  const [repos, setRepos] = useState<GitHubRepo[]>([]);
+  const [loadingRepos, setLoadingRepos] = useState(false);
+  const [selectedRepoFullName, setSelectedRepoFullName] = useState('');
+  const [repoSearchQuery, setRepoSearchQuery] = useState('');
+
   // Form State
   const [projectName, setProjectName] = useState('Checkout Payment Service');
   const [repoOwner, setRepoOwner] = useState('nebiyu-org');
   const [repoName, setRepoName] = useState('checkout-api-service');
   const [defaultBranch, setDefaultBranch] = useState('main');
 
-  const [githubToken, setGithubToken] = useState('');
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [sentrySecret, setSentrySecret] = useState('');
   const [telegramToken, setTelegramToken] = useState('');
@@ -46,6 +80,96 @@ export default function SetupWizardPage() {
     setTimeout(() => setCopiedUrl(null), 2000);
   };
 
+  const fetchRepos = useCallback(async () => {
+    setLoadingRepos(true);
+    try {
+      const res = await fetch('/api/auth/github/repos');
+      const data = await res.json();
+      if (res.ok && data.repos) {
+        setRepos(data.repos);
+      }
+    } catch (err: any) {
+      console.warn('Failed to load GitHub repos:', err.message);
+    } finally {
+      setLoadingRepos(false);
+    }
+  }, []);
+
+  const checkGitHubStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/auth/github/status');
+      const data = await res.json();
+      if (data.connected && data.user) {
+        setIsGithubConnected(true);
+        setGithubUser(data.user);
+        fetchRepos();
+      } else {
+        setIsGithubConnected(false);
+        setGithubUser(null);
+      }
+    } catch (err: any) {
+      console.warn('Failed to check GitHub status:', err.message);
+    }
+  }, [fetchRepos]);
+
+  useEffect(() => {
+    checkGitHubStatus();
+
+    // Listen for OAuth completion from popup / new tab
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'GITHUB_OAUTH_RESULT') {
+        const payload = event.data.payload;
+        if (payload.success && payload.user) {
+          setIsGithubConnected(true);
+          setGithubUser(payload.user);
+          fetchRepos();
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    // Also poll status occasionally when window refocuses
+    const handleFocus = () => {
+      checkGitHubStatus();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [checkGitHubStatus, fetchRepos]);
+
+  const handleConnectGitHub = () => {
+    window.open('/api/auth/github/login', '_blank');
+  };
+
+  const handleDisconnectGitHub = async () => {
+    try {
+      await fetch('/api/auth/github/disconnect', { method: 'POST' });
+      setIsGithubConnected(false);
+      setGithubUser(null);
+      setRepos([]);
+      setSelectedRepoFullName('');
+    } catch (err: any) {
+      alert(`Failed to disconnect: ${err.message}`);
+    }
+  };
+
+  const handleSelectRepo = (repo: GitHubRepo) => {
+    setSelectedRepoFullName(repo.fullName);
+    setRepoOwner(repo.owner);
+    setRepoName(repo.name);
+    setDefaultBranch(repo.defaultBranch || 'main');
+
+    const formatted = repo.name
+      .split(/[-_]/)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ');
+    setProjectName(formatted);
+  };
+
   const handleCreateProject = async () => {
     setSaving(true);
     try {
@@ -57,7 +181,6 @@ export default function SetupWizardPage() {
           repoOwner,
           repoName,
           defaultBranch,
-          githubToken,
           geminiApiKey,
           sentrySecret,
           telegramToken,
@@ -68,48 +191,54 @@ export default function SetupWizardPage() {
       const data = await res.json();
       if (data.success) {
         setCreatedProject(data);
-        setStep(5); // Completion step
+        setStep(5);
       } else {
-        alert(data.error || 'Failed to create project');
+        alert(data.error || 'Failed to save configuration');
       }
     } catch (e: any) {
-      alert(`Error creating project: ${e.message}`);
+      alert(`Error saving configuration: ${e.message}`);
     } finally {
       setSaving(false);
     }
   };
 
+  const filteredRepos = repos.filter(
+    (r) =>
+      r.fullName.toLowerCase().includes(repoSearchQuery.toLowerCase()) ||
+      (r.description && r.description.toLowerCase().includes(repoSearchQuery.toLowerCase()))
+  );
+
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
+    <div className="max-w-3xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-          Project Creation & Resource Connector
-        </h1>
-        <p className="text-sm text-slate-400 mt-1">
-          Create a project entity in the SQLite database and connect your GitHub repo, Gemini AI key, Sentry webhooks, and Telegram alerts.
+        <h1 className="text-xl font-bold tracking-tight text-foreground">Integrations</h1>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Connect your GitHub repository via OAuth, Gemini AI key, and monitoring webhooks.
         </p>
       </div>
 
-      {/* Progress Steps Header */}
-      <div className="grid grid-cols-4 gap-2 border-b border-slate-800 pb-4 text-xs font-semibold">
+      {/* Stepper Navigation */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 border-b border-border/60 pb-3">
         {[
-          { num: 1, title: '1. Repository Host' },
-          { num: 2, title: '2. Gemini AI Key' },
-          { num: 3, title: '3. Log Sources (Sentry)' },
-          { num: 4, title: '4. Telegram Alerts' }
-        ].map(s => (
+          { num: 1, title: 'GitHub Repository' },
+          { num: 2, title: 'AI Model' },
+          { num: 3, title: 'Monitoring' },
+          { num: 4, title: 'Alerts' }
+        ].map((s) => (
           <button
             key={s.num}
             onClick={() => setStep(s.num)}
-            className={`p-2.5 rounded-lg text-left transition-colors flex items-center gap-2 ${
+            className={`p-2.5 rounded-lg text-left transition-all border text-xs font-medium flex items-center gap-2 ${
               step === s.num
-                ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-secondary text-foreground border-border/80 shadow-sm'
+                : 'bg-card/40 border-border/40 text-muted-foreground hover:text-foreground'
             }`}
           >
-            <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-              step === s.num ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'
-            }`}>
+            <span
+              className={`size-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                step === s.num ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+              }`}
+            >
               {s.num}
             </span>
             <span className="truncate">{s.title}</span>
@@ -117,330 +246,428 @@ export default function SetupWizardPage() {
         ))}
       </div>
 
-      {/* Step 1: Repository Host (GitHub / GitLab) */}
+      {/* Step 1: GitHub Repository Connection */}
       {step === 1 && (
-        <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-semibold text-white flex items-center gap-2">
-              <FolderGit2 className="w-5 h-5 text-blue-400" />
-              Step 1: Project Details & Code Repository
-            </h3>
-            <span className="text-[11px] font-mono text-slate-500">Persisted to `projects` table</span>
-          </div>
+        <Card className="border-border/70 bg-card/60">
+          <CardHeader className="p-5 pb-3">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <FolderGit2 className="size-4 text-primary" />
+              GitHub Connection & Repository
+            </CardTitle>
+          </CardHeader>
 
-          <div className="space-y-4 text-xs">
-            <div>
-              <label className="block text-slate-300 mb-1 font-semibold">Project Name:</label>
-              <input
+          <CardContent className="p-5 pt-1 space-y-4 text-xs">
+            {/* GitHub OAuth Connection Card */}
+            {!isGithubConnected ? (
+              <div className="p-4 rounded-xl border border-border/80 bg-muted/20 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="space-y-1 text-center sm:text-left">
+                  <div className="flex items-center gap-2 justify-center sm:justify-start">
+                    <Github className="size-4 text-foreground" />
+                    <span className="font-semibold text-sm text-foreground">Connect with GitHub</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Sign in with your GitHub account to authorize repository access, code inspection, and DRAFT pull requests.
+                  </p>
+                </div>
+
+                <Button
+                  type="button"
+                  onClick={handleConnectGitHub}
+                  className="gap-2 shrink-0 font-semibold"
+                >
+                  <Github className="size-4" />
+                  Connect to GitHub
+                </Button>
+              </div>
+            ) : (
+              <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <Avatar className="size-9 border border-emerald-500/40">
+                    {githubUser?.avatarUrl ? (
+                      <AvatarImage src={githubUser.avatarUrl} alt={githubUser.login} />
+                    ) : null}
+                    <AvatarFallback>{githubUser?.login?.slice(0, 2) || 'GH'}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-foreground">
+                        {githubUser?.name || githubUser?.login}
+                      </span>
+                      <span className="text-[11px] font-mono text-muted-foreground">@{githubUser?.login}</span>
+                      <Badge variant="outline" className="text-[10px] text-emerald-400 bg-emerald-500/20 border-emerald-500/30 gap-1 py-0 px-1.5">
+                        <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        Connected
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={fetchRepos}
+                    disabled={loadingRepos}
+                    className="size-7"
+                    title="Refresh Repositories"
+                  >
+                    <RefreshCw className={`size-3.5 ${loadingRepos ? 'animate-spin' : ''}`} />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleDisconnectGitHub}
+                    className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 text-xs h-7 px-2"
+                  >
+                    <LogOut className="size-3 mr-1" />
+                    Disconnect
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Repository Picker (when connected) */}
+            {isGithubConnected && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-foreground">
+                    Select Repository:
+                  </label>
+                  <span className="text-[10px] text-muted-foreground">
+                    {repos.length} repositories
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <Search className="size-3.5 text-muted-foreground absolute left-2.5 top-2.5" />
+                  <Input
+                    type="text"
+                    value={repoSearchQuery}
+                    onChange={(e) => setRepoSearchQuery(e.target.value)}
+                    placeholder="Search repositories..."
+                    className="pl-8 h-8 text-xs bg-muted/20"
+                  />
+                </div>
+
+                <div className="max-h-48 overflow-y-auto space-y-1 pr-1 border border-border/50 rounded-lg p-1 bg-background/50">
+                  {loadingRepos && repos.length === 0 ? (
+                    <div className="p-4 text-center text-muted-foreground text-xs flex items-center justify-center gap-1.5">
+                      <RefreshCw className="size-3.5 animate-spin text-primary" />
+                      Loading repositories from GitHub...
+                    </div>
+                  ) : filteredRepos.length > 0 ? (
+                    filteredRepos.map((repo) => {
+                      const isSelected = selectedRepoFullName === repo.fullName;
+                      return (
+                        <div
+                          key={repo.id}
+                          onClick={() => handleSelectRepo(repo)}
+                          className={`p-2 rounded-md cursor-pointer transition-all flex items-center justify-between text-xs ${
+                            isSelected
+                              ? 'bg-primary/15 border border-primary/50 text-foreground'
+                              : 'hover:bg-muted/40 text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          <div className="truncate">
+                            <span className="font-mono text-xs text-foreground font-medium mr-1.5">
+                              {repo.fullName}
+                            </span>
+                            {repo.private && (
+                              <Badge variant="outline" className="text-[9px] text-amber-400 py-0 px-1 border-amber-500/20">
+                                <Lock className="size-2 mr-0.5" /> Private
+                              </Badge>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono text-muted-foreground flex items-center gap-1">
+                              <GitBranch className="size-2.5" />
+                              {repo.defaultBranch}
+                            </span>
+                            {isSelected && <Check className="size-3 text-primary" />}
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="p-3 text-center text-muted-foreground text-xs">
+                      No repositories found.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Service & Repo Fields */}
+            <div className="space-y-1">
+              <label className="text-muted-foreground">Service Name</label>
+              <Input
                 type="text"
                 value={projectName}
-                onChange={e => setProjectName(e.target.value)}
-                placeholder="e.g. Core Billing Microservice"
-                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 font-medium focus:border-blue-500 outline-none"
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="e.g. Checkout Service"
+                className="h-8 text-xs bg-muted/20"
               />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-slate-300 mb-1 font-semibold">Repo Owner (User or Org):</label>
-                <input
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <label className="text-muted-foreground">Owner / Org</label>
+                <Input
                   type="text"
                   value={repoOwner}
-                  onChange={e => setRepoOwner(e.target.value)}
-                  placeholder="e.g. nebiyu-org"
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 font-mono"
+                  onChange={(e) => setRepoOwner(e.target.value)}
+                  placeholder="nebiyu-org"
+                  className="h-8 text-xs font-mono bg-muted/20"
                 />
               </div>
-              <div>
-                <label className="block text-slate-300 mb-1 font-semibold">Repository Name:</label>
-                <input
+              <div className="space-y-1">
+                <label className="text-muted-foreground">Repository</label>
+                <Input
                   type="text"
                   value={repoName}
-                  onChange={e => setRepoName(e.target.value)}
-                  placeholder="e.g. checkout-api-service"
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 font-mono"
+                  onChange={(e) => setRepoName(e.target.value)}
+                  placeholder="checkout-api-service"
+                  className="h-8 text-xs font-mono bg-muted/20"
                 />
               </div>
-              <div>
-                <label className="block text-slate-300 mb-1 font-semibold">Default Branch:</label>
-                <input
+              <div className="space-y-1">
+                <label className="text-muted-foreground">Branch</label>
+                <Input
                   type="text"
                   value={defaultBranch}
-                  onChange={e => setDefaultBranch(e.target.value)}
+                  onChange={(e) => setDefaultBranch(e.target.value)}
                   placeholder="main"
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 font-mono"
+                  className="h-8 text-xs font-mono bg-muted/20"
                 />
               </div>
             </div>
+          </CardContent>
 
-            <div>
-              <label className="block text-slate-300 mb-1 font-semibold">
-                GitHub Personal Access Token (PAT):
-              </label>
-              <input
-                type="password"
-                value={githubToken}
-                onChange={e => setGithubToken(e.target.value)}
-                placeholder="ghp_************************************ (requires 'repo' scope)"
-                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 font-mono focus:border-blue-500 outline-none"
-              />
-              <span className="text-[11px] text-slate-500 mt-1 block">
-                Used by Octokit to create fix branches and open DRAFT pull requests. Stored encrypted in the database.
-              </span>
-            </div>
-          </div>
-
-          <div className="pt-4 border-t border-slate-800 flex justify-end">
-            <button
-              onClick={() => setStep(2)}
-              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold"
-            >
-              Next: Connect Gemini AI →
-            </button>
-          </div>
-        </div>
+          <CardFooter className="flex justify-between border-t border-border/50 p-4 items-center">
+            <span className="text-[11px] font-mono text-muted-foreground">
+              Target: <code className="text-primary">{repoOwner}/{repoName}</code>
+            </span>
+            <Button size="sm" onClick={() => setStep(2)} className="h-8 text-xs gap-1">
+              Next: AI Model
+              <ArrowRight className="size-3" />
+            </Button>
+          </CardFooter>
+        </Card>
       )}
 
-      {/* Step 2: Gemini AI Key */}
+      {/* Step 2: AI Model */}
       {step === 2 && (
-        <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-semibold text-white flex items-center gap-2">
-              <Cpu className="w-5 h-5 text-purple-400" />
-              Step 2: Connect Google Gemini API
-            </h3>
-            <span className="text-[11px] font-mono text-purple-400">Gemini 2.5 Flash Free Tier</span>
-          </div>
+        <Card className="border-border/70 bg-card/60">
+          <CardHeader className="p-5 pb-3">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Cpu className="size-4 text-primary" />
+              Gemini AI Key
+            </CardTitle>
+          </CardHeader>
 
-          <p className="text-xs text-slate-400">
-            PatchPilot uses Google Gemini 2.5 Flash (free tier from Google AI Studio) to perform adversarial falsification analysis, diagnose root causes, and author regression tests.
-          </p>
-
-          <div className="space-y-4 text-xs">
-            <div>
-              <label className="block text-slate-300 mb-1 font-semibold">
-                Google Gemini API Key:
-              </label>
-              <input
+          <CardContent className="p-5 pt-1 space-y-3.5 text-xs">
+            <div className="space-y-1">
+              <label className="text-muted-foreground">Google Gemini API Key</label>
+              <Input
                 type="password"
                 value={geminiApiKey}
-                onChange={e => setGeminiApiKey(e.target.value)}
+                onChange={(e) => setGeminiApiKey(e.target.value)}
                 placeholder="AIzaSy***********************************"
-                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 font-mono focus:border-purple-500 outline-none"
+                className="h-8 text-xs font-mono bg-muted/20"
               />
-              <span className="text-[11px] text-slate-500 mt-1.5 flex items-center gap-1">
-                Don&apos;t have one? Generate for free without credit card at
+              <span className="text-[11px] text-muted-foreground/80 flex items-center gap-1">
+                Free keys available at
                 <a
                   href="https://aistudio.google.com/app/apikey"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-400 hover:underline inline-flex items-center gap-0.5"
+                  className="text-primary hover:underline inline-flex items-center gap-0.5"
                 >
-                  aistudio.google.com <ExternalLink className="w-3 h-3" />
+                  aistudio.google.com <ExternalLink className="size-2.5" />
                 </a>
               </span>
             </div>
 
-            <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-lg text-purple-300 space-y-1">
-              <span className="font-bold block">Free Tier Rate Limiter Guard:</span>
-              <p className="text-[11px] text-slate-300">
-                The engine enforces a token-bucket rate limiter of 10 requests per minute and 250 requests per day, ensuring 100% compliance with Google AI Studio free limits.
+            <div className="p-3 bg-muted/30 border border-border/60 rounded-md text-muted-foreground space-y-1">
+              <span className="font-medium text-foreground block">Free Tier Rate Limits</span>
+              <p className="text-[11px] leading-relaxed">
+                Token bucket enforces 10 requests per minute and 250 requests per day to stay strictly within Google AI Studio free tier quotas.
               </p>
             </div>
-          </div>
+          </CardContent>
 
-          <div className="pt-4 border-t border-slate-800 flex justify-between">
-            <button onClick={() => setStep(1)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-lg text-xs">
-              ← Back
-            </button>
-            <button
-              onClick={() => setStep(3)}
-              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold"
-            >
-              Next: Connect Sentry Webhooks →
-            </button>
-          </div>
-        </div>
+          <CardFooter className="flex justify-between border-t border-border/50 p-4">
+            <Button variant="outline" size="sm" onClick={() => setStep(1)} className="h-8 text-xs gap-1">
+              <ArrowLeft className="size-3" /> Back
+            </Button>
+            <Button size="sm" onClick={() => setStep(3)} className="h-8 text-xs gap-1">
+              Next: Monitoring
+              <ArrowRight className="size-3" />
+            </Button>
+          </CardFooter>
+        </Card>
       )}
 
-      {/* Step 3: Log Sources (Sentry / Actions / Generic) */}
+      {/* Step 3: Monitoring */}
       {step === 3 && (
-        <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-semibold text-white flex items-center gap-2">
-              <Terminal className="w-5 h-5 text-cyan-400" />
-              Step 3: Connect Telemetry & Error Logging (Sentry)
-            </h3>
-            <span className="text-[11px] font-mono text-cyan-400">Vendor-Neutral Ingest</span>
-          </div>
+        <Card className="border-border/70 bg-card/60">
+          <CardHeader className="p-5 pb-3">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Terminal className="size-4 text-primary" />
+              Error Logging & Telemetry
+            </CardTitle>
+          </CardHeader>
 
-          <p className="text-xs text-slate-400">
-            Configure Sentry integration and error webhooks. Incoming production errors are normalized and correlated with active git commits.
-          </p>
-
-          <div className="space-y-4 text-xs">
-            <div>
-              <label className="block text-slate-300 mb-1 font-semibold">
-                Sentry Webhook Secret (HMAC SHA-256 verification):
-              </label>
-              <input
+          <CardContent className="p-5 pt-1 space-y-3.5 text-xs">
+            <div className="space-y-1">
+              <label className="text-muted-foreground">Sentry Webhook Secret</label>
+              <Input
                 type="password"
                 value={sentrySecret}
-                onChange={e => setSentrySecret(e.target.value)}
+                onChange={(e) => setSentrySecret(e.target.value)}
                 placeholder="sentry-webhook-secret-token"
-                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 font-mono focus:border-cyan-500 outline-none"
+                className="h-8 text-xs font-mono bg-muted/20"
               />
             </div>
 
-            <div className="p-4 bg-slate-900/60 rounded-lg border border-slate-800 space-y-2">
-              <span className="font-semibold text-slate-200 block">Your Sentry Ingest URL:</span>
+            <div className="p-3 bg-muted/30 rounded-md border border-border/60 space-y-1.5">
+              <span className="text-muted-foreground block text-[11px]">Sentry Ingest URL:</span>
               <div className="flex items-center gap-2">
-                <code className="flex-1 px-3 py-2 bg-slate-950 rounded text-cyan-400 font-mono text-[11px] truncate">
+                <code className="flex-1 px-2.5 py-1.5 bg-background rounded text-cyan-400 font-mono text-[11px] border border-border/40 truncate">
                   {webhookBaseUrl}/api/webhooks/sentry
                 </code>
-                <button
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => copyToClipboard(`${webhookBaseUrl}/api/webhooks/sentry`, 'sentry')}
-                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs flex items-center gap-1"
+                  className="h-7 text-xs gap-1"
                 >
-                  {copiedUrl === 'sentry' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedUrl === 'sentry' ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
                   Copy
-                </button>
+                </Button>
               </div>
             </div>
-          </div>
+          </CardContent>
 
-          <div className="pt-4 border-t border-slate-800 flex justify-between">
-            <button onClick={() => setStep(2)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-lg text-xs">
-              ← Back
-            </button>
-            <button
-              onClick={() => setStep(4)}
-              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold"
-            >
-              Next: Connect Telegram Channel →
-            </button>
-          </div>
-        </div>
+          <CardFooter className="flex justify-between border-t border-border/50 p-4">
+            <Button variant="outline" size="sm" onClick={() => setStep(2)} className="h-8 text-xs gap-1">
+              <ArrowLeft className="size-3" /> Back
+            </Button>
+            <Button size="sm" onClick={() => setStep(4)} className="h-8 text-xs gap-1">
+              Next: Alerts
+              <ArrowRight className="size-3" />
+            </Button>
+          </CardFooter>
+        </Card>
       )}
 
-      {/* Step 4: Telegram Channel */}
+      {/* Step 4: Alerts */}
       {step === 4 && (
-        <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-semibold text-white flex items-center gap-2">
-              <MessageSquare className="w-5 h-5 text-emerald-400" />
-              Step 4: Connect Telegram Alerts & Action Buttons
-            </h3>
-            <span className="text-[11px] font-mono text-emerald-400">Chat SDK / Telegram Bot</span>
-          </div>
+        <Card className="border-border/70 bg-card/60">
+          <CardHeader className="p-5 pb-3">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <MessageSquare className="size-4 text-primary" />
+              Telegram Alerts
+            </CardTitle>
+          </CardHeader>
 
-          <p className="text-xs text-slate-400">
-            Receive live incident alert cards on Telegram with 4 interactive buttons: View Details, Accept & Patch, Reject, Snooze.
-          </p>
-
-          <div className="space-y-4 text-xs">
-            <div>
-              <label className="block text-slate-300 mb-1 font-semibold">
-                Telegram Bot Token (created via @BotFather on Telegram):
-              </label>
-              <input
+          <CardContent className="p-5 pt-1 space-y-3.5 text-xs">
+            <div className="space-y-1">
+              <label className="text-muted-foreground">Bot Token (via @BotFather)</label>
+              <Input
                 type="password"
                 value={telegramToken}
-                onChange={e => setTelegramToken(e.target.value)}
+                onChange={(e) => setTelegramToken(e.target.value)}
                 placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
-                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 font-mono focus:border-emerald-500 outline-none"
+                className="h-8 text-xs font-mono bg-muted/20"
               />
             </div>
 
-            <div>
-              <label className="block text-slate-300 mb-1 font-semibold">
-                Your Telegram Chat ID:
-              </label>
-              <input
+            <div className="space-y-1">
+              <label className="text-muted-foreground">Chat ID</label>
+              <Input
                 type="text"
                 value={telegramChatId}
-                onChange={e => setTelegramChatId(e.target.value)}
+                onChange={(e) => setTelegramChatId(e.target.value)}
                 placeholder="e.g. 123456789 or group ID -100123456789"
-                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 font-mono focus:border-emerald-500 outline-none"
+                className="h-8 text-xs font-mono bg-muted/20"
               />
-              <span className="text-[11px] text-slate-500 mt-1 block">
-                Tip: Send a message to your bot or message @userinfobot on Telegram to get your Chat ID.
+              <span className="text-[11px] text-muted-foreground/80 block">
+                Get your Chat ID by messaging @userinfobot on Telegram.
               </span>
             </div>
-          </div>
+          </CardContent>
 
-          <div className="pt-4 border-t border-slate-800 flex justify-between items-center">
-            <button onClick={() => setStep(3)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-lg text-xs">
-              ← Back
-            </button>
-            <button
-              onClick={handleCreateProject}
-              disabled={saving}
-              className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white rounded-lg text-xs font-bold shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center gap-2"
-            >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              {saving ? 'Creating & Connecting...' : 'Save & Create Project in Database'}
-            </button>
-          </div>
-        </div>
+          <CardFooter className="flex justify-between border-t border-border/50 p-4">
+            <Button variant="outline" size="sm" onClick={() => setStep(3)} className="h-8 text-xs gap-1">
+              <ArrowLeft className="size-3" /> Back
+            </Button>
+            <Button size="sm" onClick={handleCreateProject} disabled={saving} className="h-8 text-xs gap-1.5 font-medium">
+              <Check className="size-3" />
+              {saving ? 'Saving...' : 'Save Configuration'}
+            </Button>
+          </CardFooter>
+        </Card>
       )}
 
-      {/* Step 5: Success & Generated Webhook Endpoints */}
+      {/* Step 5: Success */}
       {step === 5 && createdProject && (
-        <div className="glass-panel p-8 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-6">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
-              <CheckCircle className="w-6 h-6" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-white">Project Created & Resources Connected!</h2>
-              <p className="text-xs text-slate-300 mt-0.5 font-mono">
-                Project ID: <span className="text-emerald-400">{createdProject.projectId}</span> | Repo: {createdProject.project.repo}
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-3 text-xs">
-            <span className="text-slate-300 font-semibold block">Generated Webhook Endpoints for this Project:</span>
-
-            <div className="p-3 bg-slate-900/80 rounded-lg border border-slate-800 flex items-center justify-between">
+        <Card className="border-emerald-500/30 bg-emerald-500/5">
+          <CardHeader className="p-5 pb-3">
+            <div className="flex items-center gap-2.5">
+              <CheckCircle className="size-5 text-emerald-400" />
               <div>
-                <span className="text-slate-400 text-[11px] block">Sentry Ingest URL:</span>
+                <CardTitle className="text-sm font-semibold">Project Connected</CardTitle>
+                <p className="text-xs text-muted-foreground font-mono">
+                  {createdProject.projectId} · {createdProject.project.repo}
+                </p>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="p-5 pt-1 space-y-3 text-xs">
+            <div className="p-3 bg-card/60 rounded-md border border-border/60 flex items-center justify-between">
+              <div>
+                <span className="text-muted-foreground text-[11px] block">Sentry Ingest URL</span>
                 <code className="text-cyan-400 font-mono text-[11px]">{webhookBaseUrl}{createdProject.webhookUrls.sentry}</code>
               </div>
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => copyToClipboard(`${webhookBaseUrl}${createdProject.webhookUrls.sentry}`, 'sentry_final')}
-                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs flex items-center gap-1"
+                className="h-7 text-xs gap-1"
               >
-                {copiedUrl === 'sentry_final' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                {copiedUrl === 'sentry_final' ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
                 Copy
-              </button>
+              </Button>
             </div>
 
-            <div className="p-3 bg-slate-900/80 rounded-lg border border-slate-800 flex items-center justify-between">
+            <div className="p-3 bg-card/60 rounded-md border border-border/60 flex items-center justify-between">
               <div>
-                <span className="text-slate-400 text-[11px] block">GitHub Actions Ingest URL:</span>
+                <span className="text-muted-foreground text-[11px] block">GitHub Actions Ingest URL</span>
                 <code className="text-cyan-400 font-mono text-[11px]">{webhookBaseUrl}{createdProject.webhookUrls.githubActions}</code>
               </div>
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => copyToClipboard(`${webhookBaseUrl}${createdProject.webhookUrls.githubActions}`, 'gha_final')}
-                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs flex items-center gap-1"
+                className="h-7 text-xs gap-1"
               >
-                {copiedUrl === 'gha_final' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                {copiedUrl === 'gha_final' ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
                 Copy
-              </button>
+              </Button>
             </div>
-          </div>
+          </CardContent>
 
-          <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
-            <button
-              onClick={() => router.push('/')}
-              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold"
-            >
-              Go to Live Incidents Cockpit →
-            </button>
-          </div>
-        </div>
+          <CardFooter className="flex justify-end border-t border-border/50 p-4">
+            <Button size="sm" onClick={() => router.push('/')} className="h-8 text-xs gap-1">
+              Go to Incidents <ArrowRight className="size-3" />
+            </Button>
+          </CardFooter>
+        </Card>
       )}
     </div>
   );
