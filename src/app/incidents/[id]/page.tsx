@@ -86,7 +86,13 @@ export default function IncidentDetailPage() {
         body: JSON.stringify({ action })
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { error: text || 'Server returned non-JSON response' };
+      }
 
       if (data.fixResult?.logs && Array.isArray(data.fixResult.logs)) {
         setLiveLogs(data.fixResult.logs);
