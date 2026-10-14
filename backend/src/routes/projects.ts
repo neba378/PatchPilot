@@ -1,0 +1,158 @@
+// backend/src/routes/projects.ts
+import { Router, Request, Response } from 'express';
+import { db } from '@/db';
+import { projects, connections, policies } from '@/db/schema';
+import { desc } from 'drizzle-orm';
+import { decodeSessionCookie, GITHUB_SESSION_COOKIE_NAME } from '@/core/githubOAuth';
+import { logger } from '@/core/logger';
+
+export const projectsRouter = Router();
+
+projectsRouter.get('/', async (_req: Request, res: Response) => {
+  try {
+    const allProjects = await db.select().from(projects).orderBy(desc(projects.createdAt));
+    const allConnections = await db.select().from(connections);
+
+    const enriched = allProjects.map(p => ({
+      ...p,
+      connections: allConnections.filter(c => c.projectId === p.id).map(c => ({
+        id: c.id,
+        type: c.type,
+        metadata: JSON.parse(c.metadata || '{}'),
+        createdAt: c.createdAt
+      }))
+    }));
+
+    return res.json({ projects: enriched });
+  } catch (err: any) {
+    logger.error({ error: err.message }, '[Projects] List failed');
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+projectsRouter.post('/', async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const {
+      name,
+      repoOwner,
+      repoName,
+      defaultBranch = 'main',
+      githubToken,
+      geminiApiKey,
+      sentrySecret,
+      sentryOrg,
+      sentryProject,
+      telegramToken,
+      telegramChatId
+    } = body;
+
+    if (!name || !repoOwner || !repoName) {
+      return res.status(400).json({
+        error: 'Project name, repository owner, and repository name are required.'
+      });
+    }
+
+    const projectId = `proj_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now().toString(36)}`;
+    const now = new Date().toISOString();
+
+    // 1. Create Project
+    await db.insert(projects).values({
+      id: projectId,
+      name,
+      repoOwner,
+      repoName,
+      defaultBranch,
+      sandboxProvider: 'local-docker',
+      createdAt: now,
+      updatedAt: now
+    });
+
+    // 2. Initialize Policy
+    await db.insert(policies).values({
+      id: `POL-${projectId}`,
+      projectId,
+      autonomyLevel: 'draft_pr',
+      protectedPaths: '["migrations/**", "infra/**", ".github/**", "security/**", ".env"]',
+      maxChangedFiles: 3,
+      maxChangedLines: 60,
+      modelCallBudget: 10,
+      sandboxTimeoutSeconds: 180,
+      maxRetries: 2,
+      circuitBreakerTripped: false
+    });
+
+    // 3. Save Connections
+    const connList: any[] = [];
+    const rawSessionCookie = req.cookies?.[GITHUB_SESSION_COOKIE_NAME];
+    const session = decodeSessionCookie(rawSessionCookie);
+    const effectiveGithubToken = githubToken || session?.token || (process.env.GITHUB_TOKEN !== 'mock' ? process.env.GITHUB_TOKEN : undefined);
+
+    if (effectiveGithubToken) {
+      connList.push({
+        id: `conn_gh_${Date.now().toString(36)}`,
+        projectId,
+        type: 'github',
+        encryptedSecret: effectiveGithubToken,
+        metadata: JSON.stringify({
+          repo: `${repoOwner}/${repoName}`,
+          defaultBranch,
+          connectedVia: session ? session.source : (githubToken ? 'token' : 'env'),
+          username: session?.user?.login || repoOwner
+        }),
+        createdAt: now
+      });
+    }
+
+    if (geminiApiKey) {
+      connList.push({
+        id: `conn_gemini_${Date.now().toString(36)}`,
+        projectId,
+        type: 'gemini',
+        encryptedSecret: geminiApiKey,
+        metadata: JSON.stringify({ model: 'gemini-2.5-flash' }),
+        createdAt: now
+      });
+    }
+
+    if (sentrySecret || sentryOrg) {
+      connList.push({
+        id: `conn_sentry_${Date.now().toString(36)}`,
+        projectId,
+        type: 'sentry',
+        encryptedSecret: sentrySecret || 'default_secret',
+        metadata: JSON.stringify({ org: sentryOrg, project: sentryProject }),
+        createdAt: now
+      });
+    }
+
+    if (telegramToken) {
+      connList.push({
+        id: `conn_tg_${Date.now().toString(36)}`,
+        projectId,
+        type: 'telegram',
+        encryptedSecret: telegramToken,
+        metadata: JSON.stringify({ chatId: telegramChatId }),
+        createdAt: now
+      });
+    }
+
+    for (const conn of connList) {
+      await db.insert(connections).values(conn);
+    }
+
+    return res.json({
+      success: true,
+      projectId,
+      project: { id: projectId, name, repo: `${repoOwner}/${repoName}` },
+      webhookUrls: {
+        sentry: `/api/webhooks/sentry?projectId=${projectId}`,
+        githubActions: `/api/webhooks/github-actions?projectId=${projectId}`,
+        generic: `/api/webhooks/generic?projectId=${projectId}`
+      }
+    });
+  } catch (err: any) {
+    logger.error({ error: err.message }, '[Projects] Create failed');
+    return res.status(500).json({ error: err.message });
+  }
+});
