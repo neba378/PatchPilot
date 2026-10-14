@@ -4,7 +4,7 @@ import { app } from './app';
 import { initDb } from '@/db';
 import { logger } from '@/core/logger';
 
-const PORT = Number(process.env.PORT) || 4000;
+const PORT = Number(process.env.BACKEND_PORT || (process.env.PORT && process.env.PORT !== '3000' ? process.env.PORT : 4000)) || 4000;
 const HOST = process.env.HOST || '0.0.0.0';
 
 // Ensure SQLite database tables are properly initialized

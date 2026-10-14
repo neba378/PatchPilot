@@ -44,14 +44,39 @@ function getBaseUrl(req: Request): string {
 // Google OAuth Endpoints
 // ----------------------------------------------------
 
-authRouter.get('/google/login', (req: Request, res: Response) => {
+authRouter.get('/google/login', async (req: Request, res: Response) => {
+  const returnUrl = (req.query.returnUrl as string) || '/';
+
   if (!isGoogleOAuthConfigured()) {
-    return res.status(500).json({
-      error: 'Google OAuth is not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.'
-    });
+    // If running in development / local mode, automatically log in with demo operator session so the user is never blocked
+    if (process.env.NODE_ENV !== 'production' || process.env.DEV_AUTH_BYPASS === 'true') {
+      logger.info('[GoogleOAuth] Google Client ID/Secret not set in .env; activating dev session bypass');
+      const demoUser: GoogleUserSession = {
+        id: 'usr_nebiyu_oncall',
+        googleId: 'g_nebiyu_dev',
+        email: 'nebiyu@patchpilot.io',
+        name: 'Nebiyu Musbah',
+        picture: '',
+        role: 'admin',
+        connectedAt: new Date().toISOString()
+      };
+
+      const token = await encryptSessionToken(demoUser);
+
+      res.cookie(GOOGLE_SESSION_COOKIE_NAME, token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      });
+
+      return res.redirect(returnUrl);
+    }
+
+    return res.redirect(`/login?error=oauth_not_configured&returnUrl=${encodeURIComponent(returnUrl)}`);
   }
 
-  const returnUrl = (req.query.returnUrl as string) || '/';
   const { state, cookieValue } = generateOAuthState(returnUrl);
   const authUrl = getGoogleOAuthAuthorizeUrl(state);
 
