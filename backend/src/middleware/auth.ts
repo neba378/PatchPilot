@@ -37,7 +37,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
   }
 
   if (!token) {
-    if (process.env.NODE_ENV !== 'production' || !process.env.GOOGLE_CLIENT_ID || process.env.DEV_AUTH_BYPASS === 'true') {
+    if (process.env.NODE_ENV !== 'test' && (process.env.NODE_ENV !== 'production' || !process.env.GOOGLE_CLIENT_ID || process.env.DEV_AUTH_BYPASS === 'true')) {
       req.user = {
         id: 'usr_dev_admin',
         googleId: 'g_dev_123',
@@ -45,7 +45,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
         name: 'Nebiyu Musbah',
         picture: '',
         role: 'admin',
-        createdAt: new Date().toISOString()
+        connectedAt: new Date().toISOString()
       };
       return next();
     }
@@ -57,7 +57,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
   try {
     const session = await decryptSessionToken(token);
     if (!session) {
-      if (process.env.NODE_ENV !== 'production' || !process.env.GOOGLE_CLIENT_ID) {
+      if (process.env.NODE_ENV !== 'test' && (process.env.NODE_ENV !== 'production' || !process.env.GOOGLE_CLIENT_ID)) {
         req.user = {
           id: 'usr_dev_admin',
           googleId: 'g_dev_123',
@@ -65,7 +65,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
           name: 'Nebiyu Musbah',
           picture: '',
           role: 'admin',
-          createdAt: new Date().toISOString()
+          connectedAt: new Date().toISOString()
         };
         return next();
       }
