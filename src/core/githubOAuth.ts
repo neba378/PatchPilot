@@ -13,7 +13,7 @@ export interface GitHubUserSession {
     htmlUrl: string;
   };
   connectedAt: string;
-  source: 'oauth';
+  source: 'oauth' | 'token' | 'env';
 }
 
 export interface GitHubRepoSummary {
@@ -48,7 +48,7 @@ export function getGitHubOAuthAuthorizeUrl(state: string, redirectUri?: string):
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: effectiveRedirect,
-    scope: 'repo read:user user:email',
+    scope: 'read:user user:email',
     state,
     allow_signup: 'true'
   });

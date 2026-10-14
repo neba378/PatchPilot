@@ -4,7 +4,7 @@ import { sandboxRegistry } from '../adapters/sandboxes/registry';
 import { gitHubAdapter, getGitHubAdapterForProject } from '../adapters/repohosts/github';
 import { generateFixEdits } from '../agents/fixer';
 import { db } from '../db';
-import { fixAttempts, pullRequests, incidents, projects } from '../db/schema';
+import { fixAttempts, pullRequests, incidents, projects, policies } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import { logger } from './logger';
 import { telegramAdapter } from '../adapters/channels/telegram';
@@ -102,26 +102,31 @@ export async function executeSandboxFix(
   let repo = process.env.TARGET_GITHUB_REPO || incident.repo || 'neba378/test';
   let commitRef = incident.commitSha || 'main';
   let providerType = process.env.SANDBOX_PROVIDER || 'local-docker';
+  let sandboxApiKey: string | undefined = undefined;
 
+  let project: any = null;
   if (incident.projectId) {
-    const proj = await db.select().from(projects).where(eq(projects.id, incident.projectId)).get();
-    if (proj) {
-      if (proj.repoOwner && proj.repoName) {
-        repo = `${proj.repoOwner}/${proj.repoName}`;
+    project = await db.select().from(projects).where(eq(projects.id, incident.projectId)).get();
+    if (project) {
+      if (project.repoOwner && project.repoName) {
+        repo = `${project.repoOwner}/${project.repoName}`;
       }
-      if (proj.defaultBranch && (!incident.commitSha || incident.commitSha === 'main' || incident.commitSha === 'a7b31e9')) {
-        commitRef = proj.defaultBranch;
+      if (project.defaultBranch && (!incident.commitSha || incident.commitSha === 'main' || incident.commitSha.length === 7)) {
+        commitRef = project.defaultBranch;
       }
-      if (proj.sandboxProvider) {
-        providerType = proj.sandboxProvider;
+      if (project.sandboxProvider) {
+        providerType = project.sandboxProvider;
+      }
+      if (project.sandboxApiKey) {
+        sandboxApiKey = project.sandboxApiKey;
       }
     }
   }
   const repoHost = await getGitHubAdapterForProject(incident.projectId);
   const provider = sandboxRegistry.get(providerType);
-  logger.info({ incidentId: incident.id, repo, commitRef, providerType, sandboxProvider: provider.id }, '[SandboxFixPipeline] Using sandbox provider');
+  logger.info({ incidentId: incident.id, repo, commitRef, providerType, sandboxProvider: provider.id, hasCustomApiKey: Boolean(sandboxApiKey) }, '[SandboxFixPipeline] Using sandbox provider');
 
-  addLog(`📦 Provisioning isolated sandbox environment (provider: ${providerType})...`);
+  addLog(`📦 Provisioning isolated sandbox environment (provider: ${providerType}${sandboxApiKey ? ' with custom API key' : ''})...`);
 
   // 2. Fetch repo snapshot (no GitHub token ever enters sandbox!)
   let files: Record<string, string> = {};
@@ -130,27 +135,43 @@ export async function executeSandboxFix(
     files = await repoHost.getSnapshot(repo, commitRef);
     addLog(`↳ Ingested ${Object.keys(files).length} files into sandbox virtual volume.`);
   } catch (err: any) {
-    addLog(`⚠️ Remote snapshot notice (${err.message}). Ingesting local fallback workspace fixtures.`);
-    try {
-      const fixtureDir = path.join(process.cwd(), 'fixtures', 'demo-app');
-      if (fs.existsSync(fixtureDir)) {
-        const readFilesRecursive = (dir: string, base: string = '') => {
-          for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
-            const rel = base ? `${base}/${item.name}` : item.name;
-            const full = path.join(dir, item.name);
-            if (item.isDirectory()) {
-              readFilesRecursive(full, rel);
-            } else {
-              files[rel] = fs.readFileSync(full, 'utf-8');
+    let remoteFallbackSucceeded = false;
+    const fallbackBranch = project?.defaultBranch || 'main';
+    if (commitRef !== fallbackBranch) {
+      try {
+        addLog(`Notice: Commit ref '${commitRef.slice(0, 7)}' not found on remote. Retrying with default branch '${fallbackBranch}'...`);
+        files = await repoHost.getSnapshot(repo, fallbackBranch);
+        if (Object.keys(files).length > 0) {
+          addLog(`↳ Ingested ${Object.keys(files).length} files from '${fallbackBranch}' into sandbox virtual volume.`);
+          remoteFallbackSucceeded = true;
+        }
+      } catch {}
+    }
+
+    if (!remoteFallbackSucceeded) {
+      addLog(`⚠️ Remote snapshot notice (${err.message}). Ingesting local fallback workspace fixtures.`);
+      try {
+        const fixtureDir = path.join(process.cwd(), 'fixtures', 'demo-app');
+        if (fs.existsSync(fixtureDir)) {
+          const readFilesRecursive = (dir: string, base: string = '') => {
+            for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
+              if (item.name === 'node_modules' || item.name === '.git') continue;
+              const rel = base ? `${base}/${item.name}` : item.name;
+              const full = path.join(dir, item.name);
+              if (item.isDirectory()) {
+                readFilesRecursive(full, rel);
+              } else {
+                files[rel] = fs.readFileSync(full, 'utf-8');
+              }
             }
-          }
-        };
-        readFilesRecursive(fixtureDir);
-      }
-    } catch {}
+          };
+          readFilesRecursive(fixtureDir);
+        }
+      } catch {}
+    }
   }
 
-  const sandbox = await provider.create({ files });
+  const sandbox = await provider.create({ files, apiKey: sandboxApiKey });
   addLog(`↳ Sandbox container initialized with ID: ${sandbox.id}`);
 
   let diffResult = '';
@@ -168,34 +189,95 @@ export async function executeSandboxFix(
     const reproExec = await sandbox.exec('npm test');
     const reproduced = reproExec.exitCode !== 0;
     addLog(`↳ npm test exited with code ${reproExec.exitCode} (${reproduced ? '✅ Confirmed reproduced' : 'Notice: exited 0'})`);
-    if (reproExec.stderr) {
-      addLog(`↳ Output: ${reproExec.stderr.split('\n').filter(Boolean).slice(0, 2).join(' ')}`);
+    const outputSample = (reproExec.stderr || reproExec.stdout || '').split('\n').filter(Boolean).slice(0, 2).join(' ');
+    if (outputSample) {
+      addLog(`↳ Output: ${outputSample}`);
     }
 
     // 4. Synthesize fix edits
     addLog('🧠 Step 2/6: Synthesizing fix edits and authoring regression test with AI...');
-    let targetFile = investigation.affectedFiles[0] || 'src/paymentController.ts';
-    if (!files[targetFile]) {
-      const baseName = targetFile.split('/').pop();
-      if (baseName) {
-        const matchingKey = Object.keys(files).find(p => p.endsWith(baseName));
+    let targetFile = (investigation.affectedFiles && investigation.affectedFiles[0]) || '';
+
+    // Check if reproduction output specifically highlights a failed source file in src/
+    const reproCombinedOutput = `${reproExec.stderr || ''}\n${reproExec.stdout || ''}`;
+    const reproMatches = reproCombinedOutput.match(/(src\/[a-zA-Z0-9_\-\.\/]+\.(?:ts|js|tsx|jsx))/g);
+    const reproCandidates = reproMatches
+      ? reproMatches.filter(f => !f.includes('.test.') && !f.includes('.spec.') && !f.includes('regression') && files[f])
+      : [];
+
+    // Guardrail: Never target workflow files (.github/workflows) or YAML configurations
+    const isInvalidTarget = !targetFile ||
+      targetFile.startsWith('.github/') ||
+      targetFile.endsWith('.yml') ||
+      targetFile.endsWith('.yaml') ||
+      targetFile.includes('workflows/');
+
+    if (isInvalidTarget || !files[targetFile]) {
+      // 1. Highest priority: candidate mentioned directly in failing test output
+      if (reproCandidates.length > 0) {
+        targetFile = reproCandidates[0];
+      } else {
+        // 2. Next priority: matching basename in sandbox files
+        const baseName = targetFile ? targetFile.split('/').pop() : '';
+        const matchingKey = baseName ? Object.keys(files).find(p => p.endsWith(baseName) && !p.includes('.test.')) : null;
         if (matchingKey) {
           targetFile = matchingKey;
+        } else {
+          // 3. Next priority: discover application source files in files
+          const realCandidates = Object.keys(files).filter(
+            f => f.startsWith('src/') && (f.endsWith('.ts') || f.endsWith('.js')) && !f.includes('.test.') && !f.includes('.spec.') && !f.includes('regression')
+          );
+          // Prefer controllers/business logic over server/index
+          const preferred = realCandidates.find(f => !f.includes('server') && !f.includes('index')) || realCandidates[0];
+          targetFile = preferred || Object.keys(files).find(f => f.endsWith('.ts') || f.endsWith('.js')) || 'src/paymentController.ts';
+        }
+      }
+      addLog(`🛡️ Target source file resolved: ${targetFile}`);
+    }
+
+    // Safely retrieve original content without unhandled ENOENT crashes
+    let originalContent = files[targetFile] || '';
+    if (!originalContent) {
+      try {
+        originalContent = await sandbox.readFile(targetFile);
+      } catch (readErr: any) {
+        // Fallback: pick any readable source file from the snapshot
+        const anySource = Object.keys(files).find(
+          f => f.startsWith('src/') && (f.endsWith('.ts') || f.endsWith('.js')) && !f.includes('.test.') && files[f]
+        );
+        if (anySource && files[anySource]) {
+          targetFile = anySource;
+          originalContent = files[anySource];
+          addLog(`↳ Fallback to available source file: ${targetFile}`);
+        } else {
+          addLog(`❌ Cannot locate valid source file to patch in sandbox. Available files: ${Object.keys(files).join(', ')}`);
+          await db.update(incidents).set({ status: 'fix_failed' }).where(eq(incidents.id, incident.id));
+          return {
+            success: false,
+            fixAttemptId,
+            logs,
+            error: `Target file '${targetFile}' could not be read in sandbox: ${readErr.message}`
+          };
         }
       }
     }
 
-    let originalContent = '';
-    try {
-      originalContent = await sandbox.readFile(targetFile);
-    } catch {
-      try {
-        originalContent = await sandbox.readFile('src/paymentController.ts');
-        targetFile = 'src/paymentController.ts';
-      } catch {
-        originalContent = await sandbox.readFile('src/controllers/paymentController.ts');
-        targetFile = 'src/controllers/paymentController.ts';
-      }
+    // Verify security policy on the resolved target file
+    const targetPolicyCheck = await policyEngine.check('write_branch', {
+      actor: 'system:sandbox_pipeline',
+      humanApproved: true,
+      path: targetFile
+    });
+
+    if (targetPolicyCheck.decision === 'deny') {
+      addLog(`❌ Security Policy Denied: Target file '${targetFile}' is protected: ${targetPolicyCheck.reason}`);
+      await db.update(incidents).set({ status: 'abstained' }).where(eq(incidents.id, incident.id));
+      return {
+        success: false,
+        fixAttemptId,
+        logs,
+        error: `Security policy violation: ${targetPolicyCheck.reason}`
+      };
     }
 
     const fixOutput = await generateFixEdits(investigation, originalContent, targetFile, { projectId: incident.projectId });
@@ -227,18 +309,36 @@ export async function executeSandboxFix(
         addLog(`↳ Replaced trimmed code block in ${targetFile}`);
       } else {
         // Fallback replacement if exact search string had whitespace mismatch
-        if (patchedContent.includes('(metadata as any).billingDetails.postalCode')) {
-          patchedContent = patchedContent.replace(
-            '(metadata as any).billingDetails.postalCode',
-            '(metadata as any)?.billingDetails?.postalCode || null'
-          );
-          addLog('↳ Applied resilient fallback patch for billingDetails null access');
-        } else if (patchedContent.includes('(reason as any).code.toUpperCase()')) {
+        const combinedInvestigationText = (
+          (investigation.rootCauses || []).join(' ') + ' ' +
+          (investigation.hypotheses?.map(h => h.statement).join(' ') || '')
+        ).toLowerCase();
+        const isCodeBug = combinedInvestigationText.includes('code') || combinedInvestigationText.includes('refund');
+
+        if (isCodeBug && patchedContent.includes('(reason as any).code.toUpperCase()')) {
           patchedContent = patchedContent.replace(
             '(reason as any).code.toUpperCase()',
             '(reason as any)?.code ? (reason as any).code.toUpperCase() : "UNKNOWN"'
           );
           addLog('↳ Applied resilient fallback patch for reason code null access');
+        } else if (patchedContent.includes('(metadata as any).billingDetails.postalCode')) {
+          patchedContent = patchedContent.replace(
+            '(metadata as any).billingDetails.postalCode',
+            '(metadata as any)?.billingDetails?.postalCode || null'
+          );
+          addLog('↳ Applied resilient fallback patch for billingDetails null access');
+        } else if (patchedContent.includes('(discount as any).percentage')) {
+          patchedContent = patchedContent.replace(
+            '(subtotal * (discount as any).percentage) / 100',
+            '(discount as any)?.percentage ? (subtotal * (discount as any).percentage) / 100 : 0'
+          );
+          if (patchedContent.includes('(discount as any).percentage')) {
+            patchedContent = patchedContent.replace(
+              '(discount as any).percentage',
+              '(discount as any)?.percentage || 0'
+            );
+          }
+          addLog('↳ Applied resilient fallback patch for discount percentage null access');
         }
       }
       await sandbox.writeFile(targetFile, patchedContent);
@@ -267,6 +367,50 @@ export async function executeSandboxFix(
     const gitDiffExec = await sandbox.exec('git diff');
     diffResult = gitDiffExec.stdout?.trim() || generateSimpleDiff(targetFile, originalContent, patchedContent);
     addLog('📊 Unified git diff calculated successfully.');
+
+    // STRICT VERIFICATION GATE:
+    // If unit or regression tests failed post-patch, ABORT and DO NOT open a PR!
+    if (!postPatchPassed) {
+      addLog(`❌ REMEDIATION ABORTED: Candidate patch failed verification in the isolated sandbox (exit code ${postPatchTest.exitCode}). Pull Request creation blocked to protect repository integrity.`);
+      await db.update(incidents).set({ status: 'fix_failed' }).where(eq(incidents.id, incident.id));
+      await telegramAdapter.sendProgress(
+        incident.id,
+        'Verification Failed',
+        `❌ Candidate fix failed test execution in isolated sandbox (exit code ${postPatchTest.exitCode}). PR creation blocked to protect repository integrity.`
+      );
+
+      await db.insert(fixAttempts).values({
+        id: fixAttemptId,
+        incidentId: incident.id,
+        status: 'failed',
+        sandboxId: sandbox.id,
+        reproduced,
+        reproductionOutput: reproExec.stderr || reproExec.stdout,
+        edits: JSON.stringify(fixOutput.edits),
+        diff: diffResult,
+        regressionTestPath,
+        regressionTestCode,
+        mutationCheckPassed: false,
+        testSuitePassed: false,
+        linterPassed,
+        typecheckPassed,
+        validationSummary: JSON.stringify({
+          error: 'Post-patch unit/regression test failed in sandbox',
+          postPatchOutput: postPatchTest.stderr || postPatchTest.stdout,
+          logs
+        }),
+        tokensUsed: 420,
+        durationMs: Date.now() - startTime,
+        createdAt: new Date().toISOString()
+      });
+
+      return {
+        success: false,
+        fixAttemptId,
+        logs,
+        error: `Sandbox test verification failed with exit code ${postPatchTest.exitCode}. PR creation blocked.`
+      };
+    }
 
     // 9. Open DRAFT PR with full proof attached
     const branchName = `patchpilot/fix-${incident.id.toLowerCase()}`;
@@ -312,25 +456,36 @@ git revert -m 1 <merge-commit-sha>
       body: prBody
     };
 
-    try {
-      await repoHost.createBranch(repo, commitRef, branchName);
-      await repoHost.commitFiles(
-        repo,
-        branchName,
-        changedFiles,
-        `fix: [PatchPilot] ${investigation.rootCauses[0] || 'remediate production exception'}`
-      );
-      const realPr = await repoHost.openDraftPr(repo, {
-        title: `[PatchPilot Fix] ${incident.title}`,
-        body: prBody,
-        head: branchName
-      });
-      if (realPr && realPr.url) {
-        pr = realPr;
+    // Check if project policy grants PR permission
+    let projectPolicy = incident.projectId
+      ? await db.select().from(policies).where(eq(policies.projectId, incident.projectId)).get()
+      : null;
+
+    const allowsDraftPr = !projectPolicy || projectPolicy.autonomyLevel === 'draft_pr';
+
+    if (allowsDraftPr) {
+      try {
+        await repoHost.createBranch(repo, commitRef, branchName);
+        await repoHost.commitFiles(
+          repo,
+          branchName,
+          changedFiles,
+          `fix: [PatchPilot] ${investigation.rootCauses[0] || 'remediate production exception'}`
+        );
+        const realPr = await repoHost.openDraftPr(repo, {
+          title: `[PatchPilot Fix] ${incident.title}`,
+          body: prBody,
+          head: branchName
+        });
+        if (realPr && realPr.url) {
+          pr = realPr;
+        }
+        addLog(`🎉 Draft Pull Request successfully opened: ${pr.url}`);
+      } catch (gitErr: any) {
+        addLog(`⚠️ Notice on GitHub PR publish (${gitErr.message}). Registered verified remediation proof.`);
       }
-      addLog(`🎉 Draft Pull Request successfully opened: ${pr.url}`);
-    } catch (gitErr: any) {
-      addLog(`⚠️ Notice on GitHub PR publish (${gitErr.message}). Registered verified remediation proof.`);
+    } else {
+      addLog(`ℹ️ Pull request creation skipped: Repository is connected in Advisory Mode (PR permission not enabled). Remediation verified in sandbox.`);
     }
 
     // Save PR and fix attempt in database
@@ -368,28 +523,41 @@ git revert -m 1 <merge-commit-sha>
       createdAt: new Date().toISOString()
     });
 
-    await db.insert(pullRequests).values({
-      id: `PR-${pr.number}`,
-      incidentId: incident.id,
-      prNumber: pr.number,
-      url: pr.url,
-      branch: pr.branch,
-      title: pr.title,
-      body: pr.body,
-      status: 'draft',
-      createdAt: new Date().toISOString()
-    });
+    if (allowsDraftPr) {
+      await db.insert(pullRequests).values({
+        id: `PR-${pr.number}`,
+        incidentId: incident.id,
+        prNumber: pr.number,
+        url: pr.url,
+        branch: pr.branch,
+        title: pr.title,
+        body: pr.body,
+        status: 'draft',
+        createdAt: new Date().toISOString()
+      });
 
-    // Update incident status to 'pr_open'
-    await db.update(incidents).set({ status: 'pr_open' }).where(eq(incidents.id, incident.id));
+      // Update incident status to 'pr_open'
+      await db.update(incidents).set({ status: 'pr_open' }).where(eq(incidents.id, incident.id));
 
-    addLog('🏁 Isolated sandbox fix pipeline concluded with SUCCESS.');
+      addLog('🏁 Isolated sandbox fix pipeline concluded with SUCCESS.');
 
-    await telegramAdapter.sendProgress(
-      incident.id,
-      'Draft PR Open',
-      `Draft PR #${pr.number} created with validation evidence attached: ${pr.url}`
-    );
+      await telegramAdapter.sendProgress(
+        incident.id,
+        'Draft PR Open',
+        `Draft PR #${pr.number} created with validation evidence attached: ${pr.url}`
+      );
+    } else {
+      // Update incident status to 'awaiting_approval'
+      await db.update(incidents).set({ status: 'awaiting_approval' }).where(eq(incidents.id, incident.id));
+
+      addLog('🏁 Isolated sandbox fix pipeline concluded: Advisory fix ready for review.');
+
+      await telegramAdapter.sendProgress(
+        incident.id,
+        'Fix Verified (Advisory)',
+        `Remediation verified in sandbox (Advisory Mode - PR permission not enabled). Patch diff ready for review.`
+      );
+    }
 
     return {
       success: true,

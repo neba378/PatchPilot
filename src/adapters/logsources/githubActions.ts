@@ -41,11 +41,32 @@ export class GitHubActionsAdapter implements LogSourceAdapter {
     const errorMessage = run.display_title || commit.message || 'Build or test step failed in CI pipeline';
     const commitSha = run.head_sha || commit.id || null;
 
-    const stackFrames = [{
-      file: '.github/workflows/' + (run.path?.split('/')?.pop() || 'ci.yml'),
-      function: run.name || 'test',
-      inApp: true
-    }];
+    const logExcerpt = payload.logExcerpt || run.logExcerpt || `Workflow run failed at step: Run tests\nExit code: 1`;
+
+    // Extract real in-repo source file from logExcerpt if present (e.g. at ... (src/paymentController.ts:17:33) or FAIL src/...)
+    let detectedFile = '';
+    const fileMatch = logExcerpt.match(/\((src\/[a-zA-Z0-9_\-\.\/]+\.(ts|js|tsx|jsx)):/i) ||
+                      logExcerpt.match(/at\s+.*?\((.*?):(.*?):(.*?)\)/) ||
+                      logExcerpt.match(/(src\/[a-zA-Z0-9_\-\.\/]+\.(ts|js|tsx|jsx))/i);
+    if (fileMatch) {
+      const candidate = fileMatch[1];
+      if (!candidate.includes('.test.') && !candidate.includes('.spec.')) {
+        detectedFile = candidate;
+      }
+    }
+
+    const stackFrames = [
+      ...(detectedFile ? [{
+        file: detectedFile,
+        function: 'handler',
+        inApp: true
+      }] : []),
+      {
+        file: '.github/workflows/' + (run.path?.split('/')?.pop() || 'ci.yml'),
+        function: run.name || 'test',
+        inApp: false
+      }
+    ];
 
     const fingerprint = generateFingerprint(errorType, errorMessage, stackFrames);
 

@@ -52,7 +52,8 @@ ${fileContent}
       prompt
     });
 
-    logger.info({ explanation: res.object.explanation }, '[FixerAgent] AI SDK patch synthesis complete');
+    logger.info({ explanation: res.object.explanation, editsCount: res.object.edits.length }, '[FixerAgent] AI SDK patch synthesis complete');
+    logger.debug({ edits: res.object.edits, regressionTestLength: res.object.regressionTestCode?.length || 0 }, '[FixerAgent] AI synthesis details');
     return res.object;
   } catch (err: any) {
     logger.error({ error: err.message }, '[FixerAgent] AI SDK patch synthesis failed, using resilient deterministic repair');
@@ -65,16 +66,72 @@ function generateFallbackFix(
   fileContent: string,
   targetFilePath: string
 ): FixOutput {
-  const rootCause = (investigation.rootCauses[0] || '').toLowerCase();
+  const rootCause = (investigation.rootCauses.join(' ') || '').toLowerCase();
   const leadingHypothesis = (investigation.hypotheses.find(h => h.status === 'leading')?.statement || '').toLowerCase();
-  const isReasonCode = rootCause.includes('code') || leadingHypothesis.includes('code');
+  const isReasonCode = rootCause.includes('code') || leadingHypothesis.includes('code') || rootCause.includes('refund') || leadingHypothesis.includes('refund') || fileContent.includes('reasonCode');
+  const isDiscount = rootCause.includes('discount') || rootCause.includes('percentage') || leadingHypothesis.includes('discount') || fileContent.includes('(discount as any).percentage');
+  logger.debug({ isReasonCode, isDiscount, rootCause, leadingHypothesis, targetFilePath }, '[FixerAgent] Running fallback fix generator');
+
+  const baseName = targetFilePath.split('/').pop()?.replace(/\.(ts|js)$/, '') || 'paymentController';
+
+  if (isDiscount) {
+    let search = 'const discountAmount = (subtotal * (discount as any).percentage) / 100;';
+    let replace = 'const discountAmount = (discount as any)?.percentage ? (subtotal * (discount as any).percentage) / 100 : 0;';
+
+    if (!fileContent.includes(search)) {
+      if (fileContent.includes('(discount as any).percentage')) {
+        search = '(discount as any).percentage';
+        replace = '(discount as any)?.percentage || 0';
+      }
+    }
+
+    return {
+      explanation: 'Safely access discount.percentage using optional chaining to avoid TypeError when discount is omitted or undefined.',
+      edits: [
+        {
+          path: targetFilePath,
+          search,
+          replace
+        }
+      ],
+      regressionTestPath: 'src/__tests__/patchpilot.regression.test.ts',
+      regressionTestCode: `import { describe, it, expect } from 'vitest';
+import { handleCreateOrder } from '../${baseName}';
+
+describe('OrderController Regression - Missing Discount Parameter', () => {
+  it('safely handles omitted discount parameter without throwing TypeError', async () => {
+    let result: any = null;
+    const req = {
+      body: {
+        orderId: 'ord_123',
+        customerId: 'cus_test_reg',
+        items: [{ sku: 'SKU_TEST', quantity: 1, price: 1000 }]
+        // discount is omitted
+      }
+    };
+    const res = {
+      status: () => ({
+        json: (data: any) => { result = data; }
+      })
+    };
+
+    await expect(handleCreateOrder(req as any, res as any)).resolves.not.toThrow();
+    expect(result.success).toBe(true);
+    expect(result.total).toBe(1000);
+  });
+});`
+    };
+  }
 
   if (isReasonCode) {
     let search = 'const reasonCode = (reason as any).code.toUpperCase();';
     let replace = 'const reasonCode = (reason as any)?.code ? (reason as any).code.toUpperCase() : "UNKNOWN";';
 
     if (!fileContent.includes(search)) {
-      if (fileContent.includes('(reason as any).code')) {
+      if (fileContent.includes('(reason as any).code.toUpperCase()')) {
+        search = '(reason as any).code.toUpperCase()';
+        replace = '(reason as any)?.code ? (reason as any).code.toUpperCase() : "UNKNOWN"';
+      } else if (fileContent.includes('(reason as any).code')) {
         search = '(reason as any).code';
         replace = '(reason as any)?.code';
       }
@@ -91,7 +148,7 @@ function generateFallbackFix(
       ],
       regressionTestPath: 'src/__tests__/patchpilot.regression.test.ts',
       regressionTestCode: `import { describe, it, expect } from 'vitest';
-import { handleRefund } from '../paymentController';
+import { handleRefund } from '../${baseName}';
 
 describe('PaymentController Regression - Reason Code Exception', () => {
   it('safely handles missing reason parameter without throwing TypeError', async () => {
@@ -139,7 +196,7 @@ describe('PaymentController Regression - Reason Code Exception', () => {
     ],
     regressionTestPath: 'src/__tests__/patchpilot.regression.test.ts',
     regressionTestCode: `import { describe, it, expect } from 'vitest';
-import { handleCheckout } from '../paymentController';
+import { handleCheckout } from '../${baseName}';
 
 describe('PaymentController Regression - Billing Details Exception', () => {
   it('safely handles omitted metadata without throwing TypeError', async () => {

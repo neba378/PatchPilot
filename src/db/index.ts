@@ -27,6 +27,7 @@ export function initDb() {
       repo_name TEXT NOT NULL,
       default_branch TEXT NOT NULL DEFAULT 'main',
       sandbox_provider TEXT NOT NULL DEFAULT 'fake',
+      sandbox_api_key TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -224,6 +225,11 @@ export function initDb() {
       last_login_at TEXT NOT NULL
     );
   `);
+
+  // Safe schema migrations for existing databases
+  try {
+    sqlite.exec("ALTER TABLE projects ADD COLUMN sandbox_api_key TEXT;");
+  } catch {}
 }
 
 // Run initial migration

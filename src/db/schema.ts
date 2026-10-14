@@ -8,6 +8,7 @@ export const projects = sqliteTable('projects', {
   repoName: text('repo_name').notNull(),
   defaultBranch: text('default_branch').notNull().default('main'),
   sandboxProvider: text('sandbox_provider').notNull().default('fake'),
+  sandboxApiKey: text('sandbox_api_key'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull()
 });

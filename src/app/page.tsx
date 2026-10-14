@@ -19,7 +19,15 @@ import {
   Trash2,
   Loader2,
   Cpu,
-  Boxes
+  Boxes,
+  Key,
+  Settings,
+  Eye,
+  EyeOff,
+  Check,
+  X,
+  ShieldCheck,
+  Sparkles
 } from 'lucide-react';
 
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -49,6 +57,7 @@ interface Project {
   repoName: string;
   defaultBranch: string;
   sandboxProvider: string;
+  sandboxApiKey?: string;
   createdAt: string;
   updatedAt: string;
   connections?: ProjectConnection[];
@@ -166,8 +175,29 @@ export default function DashboardPage() {
   };
 
   const [updatingSandbox, setUpdatingSandbox] = useState(false);
+  const [isSandboxModalOpen, setIsSandboxModalOpen] = useState(false);
+  const [modalProvider, setModalProvider] = useState<'local-docker' | 'e2b' | 'modal' | 'fake'>('local-docker');
+  const [modalApiKey, setModalApiKey] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [savingSandboxConfig, setSavingSandboxConfig] = useState(false);
+  const [sandboxSaveSuccess, setSandboxSaveSuccess] = useState(false);
 
-  const handleUpdateSandboxProvider = async (projectId: string, newProvider: string) => {
+  const openSandboxConfig = (project: Project, requestedProvider?: 'local-docker' | 'e2b' | 'modal' | 'fake') => {
+    setModalProvider(requestedProvider || (project.sandboxProvider as any) || 'local-docker');
+    setModalApiKey(project.sandboxApiKey || '');
+    setShowApiKey(false);
+    setSandboxSaveSuccess(false);
+    setIsSandboxModalOpen(true);
+  };
+
+  const handleUpdateSandboxProvider = async (projectId: string, newProvider: 'local-docker' | 'e2b' | 'modal' | 'fake') => {
+    const proj = projects.find(p => p.id === projectId);
+    // If selecting e2b or modal and has no key configured yet, immediately open modal for key entry
+    if ((newProvider === 'e2b' || newProvider === 'modal') && !proj?.sandboxApiKey) {
+      if (proj) openSandboxConfig(proj, newProvider);
+      return;
+    }
+
     setUpdatingSandbox(true);
     try {
       const res = await fetch(`/api/projects/${projectId}`, {
@@ -185,6 +215,40 @@ export default function DashboardPage() {
       alert(`Error updating sandbox provider: ${err.message}`);
     } finally {
       setUpdatingSandbox(false);
+    }
+  };
+
+  const handleSaveSandboxConfig = async () => {
+    if (!selectedProject) return;
+    setSavingSandboxConfig(true);
+    try {
+      const res = await fetch(`/api/projects/${selectedProject.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sandboxProvider: modalProvider,
+          sandboxApiKey: modalApiKey.trim() || null
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setProjects(prev => prev.map(p => p.id === selectedProject.id ? {
+          ...p,
+          sandboxProvider: modalProvider,
+          sandboxApiKey: modalApiKey.trim() || undefined
+        } : p));
+        setSandboxSaveSuccess(true);
+        setTimeout(() => {
+          setIsSandboxModalOpen(false);
+          setSandboxSaveSuccess(false);
+        }, 900);
+      } else {
+        alert(data.error || 'Failed to update sandbox configuration');
+      }
+    } catch (err: any) {
+      alert(`Error updating sandbox configuration: ${err.message}`);
+    } finally {
+      setSavingSandboxConfig(false);
     }
   };
 
@@ -287,49 +351,58 @@ export default function DashboardPage() {
       : 'neba378/test';
 
     const isSentry = type === 'sentry';
+    const isOrderService = repoFullName.includes('test-2') || repoFullName.toLowerCase().includes('order');
     // Alternate between billingDetails and code bug to allow testing both scenarios!
     const testReasonCode = Math.random() > 0.5;
+    const targetBranch = selectedProject?.defaultBranch || 'main';
 
     setSimulationFeedback({
       type: 'info',
       message: isSentry
         ? `📡 Ingesting Sentry exception telemetry for ${selectedProject?.name || 'Microservice'}...`
-        : `⚡ Triggering simulated GitHub Actions CI failure on branch ${selectedProject?.defaultBranch || 'main'}...`
+        : `⚡ Triggering simulated GitHub Actions CI failure on branch ${targetBranch}...`
     });
 
     try {
       const url = `/api/webhooks/${type === 'actions' ? 'github-actions' : type}?simulation=true${selectedProject ? `&projectId=${selectedProject.id}` : ''}`;
+
+      const sentryTitle = isOrderService
+        ? "TypeError: Cannot read properties of undefined (reading 'percentage')"
+        : (testReasonCode ? "TypeError: Cannot read properties of undefined (reading 'code')" : "TypeError: Cannot read properties of undefined (reading 'billingDetails')");
+      const sentryFile = isOrderService ? 'src/orderController.ts' : 'src/paymentController.ts';
+      const sentryLine = isOrderService ? 29 : (testReasonCode ? 44 : 17);
+      const sentryFn = isOrderService ? 'handleCreateOrder' : (testReasonCode ? 'handleRefund' : 'handleCheckout');
+
+      const actionsLog = isOrderService
+        ? "FAIL src/__tests__/orderController.test.ts\nTypeError: Cannot read properties of undefined (reading 'percentage')\n  at handleCreateOrder (src/orderController.ts:29:58)"
+        : (testReasonCode
+          ? "FAIL src/__tests__/paymentController.test.ts\nTypeError: Cannot read properties of undefined (reading 'code')\n  at handleRefund (src/paymentController.ts:44:33)"
+          : "FAIL src/__tests__/paymentController.test.ts\nTypeError: Cannot read properties of undefined (reading 'billingDetails')\n  at handleCheckout (src/paymentController.ts:17:33)");
 
       const payload = isSentry
         ? {
             projectId: selectedProject?.id,
             event: {
               event_id: `evt_${Date.now()}`,
-              title: testReasonCode
-                ? "TypeError: Cannot read properties of undefined (reading 'code')"
-                : "TypeError: Cannot read properties of undefined (reading 'billingDetails')",
+              title: sentryTitle,
               metadata: {
                 type: 'TypeError',
-                value: testReasonCode
-                  ? "Cannot read properties of undefined (reading 'code')"
-                  : "Cannot read properties of undefined (reading 'billingDetails')"
+                value: sentryTitle.replace('TypeError: ', '')
               },
               environment: 'production',
-              release: `${repoFullName.split('/')[1] || 'service'}@a7b31e9`,
+              release: `${repoFullName.split('/')[1] || 'service'}@${targetBranch}`,
               entries: [
                 {
                   type: 'exception',
                   data: {
                     values: [{
                       type: 'TypeError',
-                      value: testReasonCode
-                        ? "Cannot read properties of undefined (reading 'code')"
-                        : "Cannot read properties of undefined (reading 'billingDetails')",
+                      value: sentryTitle.replace('TypeError: ', ''),
                       stacktrace: {
                         frames: [{
-                          filename: 'src/paymentController.ts',
-                          lineno: testReasonCode ? 44 : 17,
-                          function: testReasonCode ? 'handleRefund' : 'handleCheckout',
+                          filename: sentryFile,
+                          lineno: sentryLine,
+                          function: sentryFn,
                           in_app: true
                         }]
                       }
@@ -344,17 +417,17 @@ export default function DashboardPage() {
             workflow_run: {
               id: Math.floor(1000 + Math.random() * 9000),
               name: 'CI Test Suite',
-              head_branch: selectedProject?.defaultBranch || 'main',
-              head_sha: 'a7b31e9',
+              head_branch: targetBranch,
+              head_sha: targetBranch,
               conclusion: 'failure',
-              display_title: testReasonCode
-                ? 'feat: add customer refund handler'
-                : 'feat: add customer metadata payload parsing in checkout'
+              display_title: isOrderService
+                ? 'feat: add promotional discount calculations'
+                : (testReasonCode
+                  ? 'feat: add customer refund handler'
+                  : 'feat: add customer metadata payload parsing in checkout')
             },
             repository: { full_name: repoFullName },
-            logExcerpt: testReasonCode
-              ? "FAIL src/__tests__/paymentController.test.ts\nTypeError: Cannot read properties of undefined (reading 'code')\n  at handleRefund (src/paymentController.ts:44:33)"
-              : "FAIL src/__tests__/paymentController.test.ts\nTypeError: Cannot read properties of undefined (reading 'billingDetails')\n  at handleCheckout (src/paymentController.ts:17:33)"
+            logExcerpt: actionsLog
           };
 
       const res = await fetch(url, {
@@ -680,7 +753,7 @@ export default function DashboardPage() {
                     <span className="text-[11px] text-muted-foreground">Sandbox:</span>
                     <select
                       value={selectedProject.sandboxProvider || 'local-docker'}
-                      onChange={(e) => handleUpdateSandboxProvider(selectedProject.id, e.target.value)}
+                      onChange={(e) => handleUpdateSandboxProvider(selectedProject.id, e.target.value as any)}
                       disabled={updatingSandbox}
                       className="bg-card text-foreground border border-border/70 rounded px-2 py-0.5 text-xs font-medium cursor-pointer focus:outline-none focus:border-primary"
                     >
@@ -689,6 +762,21 @@ export default function DashboardPage() {
                       <option value="modal">Modal Labs (3rd Party Cloud)</option>
                       <option value="fake">In-Memory Mock</option>
                     </select>
+                    {(selectedProject.sandboxProvider === 'e2b' || selectedProject.sandboxProvider === 'modal') && (
+                      <button
+                        type="button"
+                        onClick={() => openSandboxConfig(selectedProject)}
+                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+                          selectedProject.sandboxApiKey
+                            ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20'
+                            : 'border-amber-500/50 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 animate-pulse'
+                        }`}
+                        title="Configure Sandbox API Key"
+                      >
+                        <Key className="size-2.5" />
+                        <span>{selectedProject.sandboxApiKey ? 'Key Set' : 'Set Key'}</span>
+                      </button>
+                    )}
                     {updatingSandbox && <RefreshCw className="size-3 animate-spin text-primary" />}
                   </div>
                 </div>
@@ -772,6 +860,18 @@ export default function DashboardPage() {
                 <span className="font-mono text-primary font-semibold">
                   {selectedProject.sandboxProvider || 'local-docker'}
                 </span>
+                {(selectedProject.sandboxProvider === 'e2b' || selectedProject.sandboxProvider === 'modal') && (
+                  <Badge
+                    variant="outline"
+                    className={`ml-2 text-[10px] py-0 px-1.5 font-sans ${
+                      selectedProject.sandboxApiKey
+                        ? 'border-emerald-500/50 text-emerald-400 bg-emerald-500/10'
+                        : 'border-amber-500/50 text-amber-400 bg-amber-500/10'
+                    }`}
+                  >
+                    {selectedProject.sandboxApiKey ? 'Key Configured' : 'API Key Missing'}
+                  </Badge>
+                )}
                 <span className="text-muted-foreground ml-1.5">
                   {selectedProject.sandboxProvider === 'e2b'
                     ? '— Isolated 3rd-party cloud microVM for verification.'
@@ -783,7 +883,7 @@ export default function DashboardPage() {
                 </span>
               </div>
             </div>
-            <div className="flex items-center gap-1 self-end sm:self-auto shrink-0">
+            <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0">
               {(['local-docker', 'e2b', 'modal', 'fake'] as const).map((prov) => (
                 <Button
                   key={prov}
@@ -806,6 +906,17 @@ export default function DashboardPage() {
                   {prov}
                 </Button>
               ))}
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => openSandboxConfig(selectedProject)}
+                className="h-7 px-2 text-[11px] gap-1 border-border/80 hover:border-primary/50 text-foreground ml-1"
+                title="Configure Sandbox Environment & API Key"
+              >
+                <Settings className="size-3 text-muted-foreground" />
+                <span className="hidden sm:inline">Configure</span>
+              </Button>
             </div>
           </div>
 
@@ -968,6 +1079,176 @@ export default function DashboardPage() {
               )}
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {/* Sandbox Configuration Modal */}
+      {isSandboxModalOpen && selectedProject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in-0">
+          <div className="relative w-full max-w-xl rounded-xl border border-border/80 bg-card p-6 shadow-2xl space-y-5 animate-in zoom-in-95">
+            <div className="flex items-start justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-md bg-primary/10 text-primary">
+                    <Boxes className="size-5" />
+                  </div>
+                  <h3 className="text-base font-bold text-foreground">Execution Sandbox Environment</h3>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Choose where autonomous reproduction, mutation checks, and unit tests execute before opening Pull Requests for <span className="font-mono text-foreground font-semibold">{selectedProject.name}</span>.
+                </p>
+              </div>
+              <button
+                onClick={() => setIsSandboxModalOpen(false)}
+                className="text-muted-foreground hover:text-foreground p-1 rounded-md hover:bg-muted transition-colors"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            {/* Provider Options Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {[
+                {
+                  id: 'local-docker',
+                  name: 'Local Docker',
+                  badge: 'Container (Default)',
+                  badgeColor: 'border-border/60 text-muted-foreground',
+                  desc: 'Host container execution with filesystem isolation. Zero external cost & tests run locally.'
+                },
+                {
+                  id: 'e2b',
+                  name: 'E2B Sandbox',
+                  badge: 'Cloud MicroVM',
+                  badgeColor: 'border-primary/40 text-primary bg-primary/5',
+                  desc: 'Secure 3rd-party cloud microVM for running untrusted repository code and test suites.'
+                },
+                {
+                  id: 'modal',
+                  name: 'Modal Labs',
+                  badge: 'Serverless Cloud',
+                  badgeColor: 'border-border/60 text-muted-foreground',
+                  desc: 'Serverless cloud container infrastructure with elastic compute scaling.'
+                },
+                {
+                  id: 'fake',
+                  name: 'In-Memory Simulation',
+                  badge: 'Dry Run Mock',
+                  badgeColor: 'border-amber-500/40 text-amber-400 bg-amber-500/5',
+                  desc: 'Fast mock simulation for dry-run testing without spinning up real containers.'
+                }
+              ].map((prov) => {
+                const isSelected = modalProvider === prov.id;
+                return (
+                  <div
+                    key={prov.id}
+                    onClick={() => setModalProvider(prov.id as any)}
+                    className={`p-3 rounded-lg border cursor-pointer transition-all space-y-1 ${
+                      isSelected
+                        ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/40'
+                        : 'border-border/60 bg-muted/20 hover:border-border hover:bg-muted/40'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-xs font-semibold ${isSelected ? 'text-primary' : 'text-foreground'}`}>
+                          {prov.name}
+                        </span>
+                        <Badge variant="outline" className={`text-[9px] py-0 px-1 ${prov.badgeColor}`}>
+                          {prov.badge}
+                        </Badge>
+                      </div>
+                      {isSelected && <Check className="size-3.5 text-primary" />}
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">{prov.desc}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* API Key Input Section (Conditional for e2b / modal) */}
+            {(modalProvider === 'e2b' || modalProvider === 'modal') && (
+              <div className="p-3.5 rounded-lg border border-border/70 bg-muted/30 space-y-2.5 animate-in fade-in-50">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Key className="size-3.5 text-primary" />
+                    <span>{modalProvider === 'e2b' ? 'E2B API Key' : 'Modal Token ID / Secret'}</span>
+                  </label>
+                  <a
+                    href={modalProvider === 'e2b' ? 'https://e2b.dev/dashboard' : 'https://modal.com/settings'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] text-primary hover:underline flex items-center gap-1"
+                  >
+                    <span>Get Key</span>
+                    <ExternalLink className="size-2.5" />
+                  </a>
+                </div>
+
+                <div className="relative">
+                  <Input
+                    type={showApiKey ? 'text' : 'password'}
+                    placeholder={modalProvider === 'e2b' ? 'e2b_...' : 'ak-...'}
+                    value={modalApiKey}
+                    onChange={(e) => setModalApiKey(e.target.value)}
+                    className="h-8 text-xs font-mono pr-8 bg-background border-border/80"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showApiKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-muted-foreground leading-normal">
+                  {modalProvider === 'e2b'
+                    ? 'Required to spawn secure cloud microVMs on E2B. Keys are encrypted and saved per-project in your SQLite database.'
+                    : 'Required for Modal serverless container execution. Stored securely per-project.'}
+                </p>
+              </div>
+            )}
+
+            {/* Security Guardrail Notice */}
+            <div className="flex items-center gap-2 p-2.5 rounded-md bg-muted/30 border border-border/50 text-[11px] text-muted-foreground">
+              <ShieldCheck className="size-3.5 text-primary shrink-0" />
+              <span>Air-gapped security: Code is loaded into the sandbox as a snapshot. GitHub tokens are NEVER exposed.</span>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between pt-2 border-t border-border/60">
+              <span className="text-[11px] text-muted-foreground">
+                {sandboxSaveSuccess ? (
+                  <span className="text-emerald-400 font-medium flex items-center gap-1">
+                    <Check className="size-3.5" /> Saved successfully!
+                  </span>
+                ) : (
+                  <span>Project: {selectedProject.name}</span>
+                )}
+              </span>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsSandboxModalOpen(false)}
+                  className="h-8 text-xs"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleSaveSandboxConfig}
+                  disabled={savingSandboxConfig}
+                  className="h-8 text-xs gap-1.5 font-medium"
+                >
+                  {savingSandboxConfig ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
+                  <span>Save Sandbox Configuration</span>
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

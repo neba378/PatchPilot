@@ -24,11 +24,16 @@ import {
   Zap,
   SlidersHorizontal,
   Key,
+  Eye,
+  EyeOff,
   Boxes,
   AlertTriangle,
   CheckCircle2,
   ShieldCheck,
-  Settings2
+  GitPullRequest,
+  Settings2,
+  Save,
+  Plus
 } from 'lucide-react';
 
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
@@ -87,6 +92,15 @@ export default function SetupWizardPage() {
   const [canInvestigate, setCanInvestigate] = useState(true);
   const [callbackCopied, setCallbackCopied] = useState(false);
 
+  // Per-repo PR permission & Fine-Grained token state
+  const [repoScopedToken, setRepoScopedToken] = useState('');
+  const [verifyingRepoToken, setVerifyingRepoToken] = useState(false);
+  const [repoTokenError, setRepoTokenError] = useState<string | null>(null);
+  const [repoTokenVerified, setRepoTokenVerified] = useState(false);
+
+  // Projects list
+  const [existingProjects, setExistingProjects] = useState<any[]>([]);
+
   // Form State
   const [activeProjectId, setActiveProjectId] = useState<string>('');
   const [projectName, setProjectName] = useState('Checkout Payment Service');
@@ -94,6 +108,8 @@ export default function SetupWizardPage() {
   const [repoName, setRepoName] = useState('checkout-api-service');
   const [defaultBranch, setDefaultBranch] = useState('main');
   const [sandboxProvider, setSandboxProvider] = useState<'local-docker' | 'e2b' | 'modal' | 'fake'>('local-docker');
+  const [sandboxApiKey, setSandboxApiKey] = useState<string>('');
+  const [showSandboxKey, setShowSandboxKey] = useState<boolean>(false);
 
   // AI Model State
   const [aiProvider, setAiProvider] = useState<'gemini' | 'openai' | 'anthropic' | 'gateway'>('gemini');
@@ -153,12 +169,46 @@ export default function SetupWizardPage() {
       const res = await fetch('/api/projects');
       const data = await res.json();
       if (data.projects && data.projects.length > 0) {
-        const prj = data.projects[0];
+        setExistingProjects(data.projects);
+
+        // Check if a specific project was requested via query param
+        const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+        const requestedId = params?.get('projectId');
+        const prj = (requestedId ? data.projects.find((p: any) => p.id === requestedId) : null) || data.projects[0];
+
         setActiveProjectId(prj.id);
         if (prj.name) setProjectName(prj.name);
         if (prj.repoOwner) setRepoOwner(prj.repoOwner);
         if (prj.repoName) setRepoName(prj.repoName);
         if (prj.defaultBranch) setDefaultBranch(prj.defaultBranch);
+
+        const fullRepo = prj.repoOwner && prj.repoName ? `${prj.repoOwner}/${prj.repoName}` : '';
+        if (fullRepo) {
+          setSelectedRepoFullName(fullRepo);
+          checkRepoPermissions(fullRepo);
+        }
+
+        if (prj.sandboxProvider) {
+          setSandboxProvider(prj.sandboxProvider);
+        }
+        if (prj.sandboxApiKey) {
+          setSandboxApiKey(prj.sandboxApiKey);
+        }
+
+        if (prj.policy) {
+          setCanDraftPR(prj.policy.autonomyLevel === 'draft_pr');
+        }
+
+        const ghConn = prj.connections?.find((c: any) => c.type === 'github');
+        if (ghConn) {
+          if (ghConn.metadata?.canDraftPR !== undefined) {
+            setCanDraftPR(Boolean(ghConn.metadata.canDraftPR));
+          }
+          if (ghConn.metadata?.connectedVia === 'repo_token' && ghConn.encryptedSecret) {
+            setRepoScopedToken(ghConn.encryptedSecret);
+            setRepoTokenVerified(true);
+          }
+        }
 
         const aiConn = prj.connections?.find((c: any) =>
           ['gemini', 'openai', 'anthropic', 'gateway', 'ai'].includes(c.type)
@@ -181,9 +231,17 @@ export default function SetupWizardPage() {
           }
         }
 
+        const sentryConn = prj.connections?.find((c: any) => c.type === 'sentry');
+        if (sentryConn?.encryptedSecret && sentryConn.encryptedSecret !== 'default_secret') {
+          setSentrySecret(sentryConn.encryptedSecret);
+        }
+
         const tgConn = prj.connections?.find((c: any) => c.type === 'telegram');
         if (tgConn?.metadata?.chatId) {
           setTelegramChatId(tgConn.metadata.chatId);
+        }
+        if (tgConn?.encryptedSecret) {
+          setTelegramToken(tgConn.encryptedSecret);
         }
       }
     } catch (err: any) {
@@ -221,22 +279,36 @@ export default function SetupWizardPage() {
     };
   }, [checkGitHubStatus, fetchRepos, loadExistingProject]);
 
-  const checkRepoPermissions = async (fullName: string) => {
+  const checkRepoPermissions = async (fullName: string, overrideToken?: string) => {
     setPermChecking(true);
     setRepoPermissions(null);
+    setRepoTokenError(null);
     try {
       const res = await fetch('/api/auth/github/check-permissions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo: fullName })
+        body: JSON.stringify({
+          repo: fullName,
+          token: overrideToken !== undefined ? overrideToken.trim() : (repoScopedToken.trim() || undefined)
+        })
       });
       const data = await res.json();
       setRepoPermissions(data);
       if (data.canWrite) {
         setCanDraftPR(true);
+        if (overrideToken) {
+          setRepoTokenVerified(true);
+        }
+      } else {
+        if (overrideToken) {
+          setRepoTokenError(data.error || 'Write and Draft PR permission not granted for this repository.');
+        }
       }
     } catch (e: any) {
       setRepoPermissions({ canRead: false, canWrite: false, error: e.message });
+      if (overrideToken) {
+        setRepoTokenError(e.message);
+      }
     } finally {
       setPermChecking(false);
     }
@@ -307,6 +379,20 @@ export default function SetupWizardPage() {
     }
   };
 
+  const handleStartNewProject = () => {
+    setActiveProjectId('');
+    setSelectedRepoFullName('');
+    setProjectName('New Project Service');
+    setRepoOwner('');
+    setRepoName('');
+    setDefaultBranch('main');
+    setRepoScopedToken('');
+    setRepoTokenError(null);
+    setRepoTokenVerified(false);
+    setCanDraftPR(true);
+    setRepoPermissions(null);
+  };
+
   const handleSelectRepo = (repo: GitHubRepo) => {
     setSelectedRepoFullName(repo.fullName);
     setRepoOwner(repo.owner);
@@ -317,7 +403,43 @@ export default function SetupWizardPage() {
       .split(/[-_]/)
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
       .join(' ');
-    setProjectName(formatted);
+
+    const existing = existingProjects.find(
+      (p) => p.repoOwner?.toLowerCase() === repo.owner.toLowerCase() && p.repoName?.toLowerCase() === repo.name.toLowerCase()
+    );
+
+    if (existing) {
+      // Switch to editing existing project for this repo
+      setActiveProjectId(existing.id);
+      setProjectName(existing.name || formatted);
+      if (existing.defaultBranch) setDefaultBranch(existing.defaultBranch);
+      if (existing.sandboxProvider) setSandboxProvider(existing.sandboxProvider);
+      if (existing.sandboxApiKey) setSandboxApiKey(existing.sandboxApiKey);
+      if (existing.policy) setCanDraftPR(existing.policy.autonomyLevel === 'draft_pr');
+
+      const ghConn = existing.connections?.find((c: any) => c.type === 'github');
+      if (ghConn) {
+        if (ghConn.metadata?.canDraftPR !== undefined) {
+          setCanDraftPR(Boolean(ghConn.metadata.canDraftPR));
+        }
+        if (ghConn.metadata?.connectedVia === 'repo_token' && ghConn.encryptedSecret) {
+          setRepoScopedToken(ghConn.encryptedSecret);
+          setRepoTokenVerified(true);
+        } else {
+          setRepoScopedToken('');
+          setRepoTokenVerified(false);
+        }
+      }
+    } else {
+      // Brand NEW project for this repository - do NOT overwrite previous project!
+      setActiveProjectId('');
+      setProjectName(formatted);
+      setRepoScopedToken('');
+      setRepoTokenError(null);
+      setRepoTokenVerified(false);
+      setCanDraftPR(true);
+    }
+
     checkRepoPermissions(repo.fullName);
   };
 
@@ -354,7 +476,7 @@ export default function SetupWizardPage() {
     }
   };
 
-  const handleCreateProject = async () => {
+  const handleSaveStep = async (nextStep: number) => {
     setSaving(true);
     try {
       const effectiveModel = isCustomModel ? customModelInput.trim() : aiModel;
@@ -369,11 +491,13 @@ export default function SetupWizardPage() {
           repoOwner,
           repoName,
           defaultBranch,
+          githubToken: repoScopedToken.trim() || patToken.trim() || undefined,
           aiProvider,
           aiModel: effectiveModel,
           aiApiKey: effectiveAiKey,
           geminiApiKey: effectiveAiKey,
           sandboxProvider,
+          sandboxApiKey: sandboxApiKey.trim() || undefined,
           canDraftPR,
           sentrySecret,
           telegramToken,
@@ -383,8 +507,22 @@ export default function SetupWizardPage() {
 
       const data = await res.json();
       if (data.success) {
+        if (data.projectId) {
+          setActiveProjectId(data.projectId);
+        }
+        // Refresh existing projects list so UI reflects the newly created/updated project
+        try {
+          const refRes = await fetch('/api/projects');
+          const refData = await refRes.json();
+          if (refData.projects) setExistingProjects(refData.projects);
+        } catch {}
+
         setCreatedProject(data);
-        setStep(6);
+        if (nextStep === 6) {
+          setStep(6);
+        } else if (nextStep !== step) {
+          setStep(nextStep);
+        }
       } else {
         alert(data.error || 'Failed to save configuration');
       }
@@ -393,6 +531,10 @@ export default function SetupWizardPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleCreateProject = async () => {
+    await handleSaveStep(6);
   };
 
   const filteredRepos = repos.filter(
@@ -444,10 +586,38 @@ export default function SetupWizardPage() {
       {step === 1 && (
         <Card className="border-border/70 bg-card/60">
           <CardHeader className="p-5 pb-3">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <FolderGit2 className="size-4 text-primary" />
-              GitHub Connection & Repository
-            </CardTitle>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <FolderGit2 className="size-4 text-primary" />
+                GitHub Connection & Repository
+              </CardTitle>
+
+              <div className="flex items-center gap-2">
+                {activeProjectId ? (
+                  <Badge variant="outline" className="text-[10px] text-cyan-400 border-cyan-500/30 bg-cyan-500/10 gap-1.5 py-0.5 px-2">
+                    <span>Editing Project:</span>
+                    <strong className="text-foreground">{projectName}</strong>
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-500/30 bg-emerald-500/10 gap-1 py-0.5 px-2">
+                    <Sparkles className="size-2.5" /> New Project Mode
+                  </Badge>
+                )}
+
+                {existingProjects.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleStartNewProject}
+                    className="h-7 text-xs gap-1 border-primary/40 text-primary hover:bg-primary/10"
+                  >
+                    <Plus className="size-3" />
+                    New Project
+                  </Button>
+                )}
+              </div>
+            </div>
           </CardHeader>
 
           <CardContent className="p-5 pt-1 space-y-4 text-xs">
@@ -490,7 +660,9 @@ export default function SetupWizardPage() {
                 {ghConnectMode === 'oauth' ? (
                   <div className="space-y-3">
                     <p className="text-xs text-muted-foreground leading-relaxed">
-                      Connect via GitHub OAuth with the <code>repo</code> scope to automatically grant branch creation, commit pushing, and Draft PR permissions.
+                      Connect via GitHub OAuth with read-only identity scope (<code>read:user</code>, <code>user:email</code>).
+                      Blanket repository write permissions are <strong>never</strong> requested at the OAuth App level.
+                      Pull request permissions are granted specifically per repository when connected below.
                     </p>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -699,13 +871,20 @@ export default function SetupWizardPage() {
                               : 'hover:bg-muted/40 text-muted-foreground hover:text-foreground'
                           }`}
                         >
-                          <div className="truncate">
+                          <div className="truncate flex items-center gap-1.5">
                             <span className="font-mono text-xs text-foreground font-medium mr-1.5">
                               {repo.fullName}
                             </span>
                             {repo.private && (
                               <Badge variant="outline" className="text-[9px] text-amber-400 py-0 px-1 border-amber-500/20">
                                 <Lock className="size-2 mr-0.5" /> Private
+                              </Badge>
+                            )}
+                            {existingProjects.some(
+                              (p) => p.repoOwner?.toLowerCase() === repo.owner.toLowerCase() && p.repoName?.toLowerCase() === repo.name.toLowerCase()
+                            ) && (
+                              <Badge variant="outline" className="text-[9px] text-cyan-400 py-0 px-1 border-cyan-500/30 bg-cyan-500/10">
+                                Project Linked
                               </Badge>
                             )}
                           </div>
@@ -729,91 +908,202 @@ export default function SetupWizardPage() {
               </div>
             )}
 
-            {/* Selected Repo Capabilities & Permissions Checklist */}
+            {/* Repository Permissions & Pull Request Authorization */}
             {isGithubConnected && selectedRepoFullName && (
-              <div className="p-3.5 rounded-xl border border-border/80 bg-muted/20 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-xs text-foreground flex items-center gap-1.5">
-                    <ShieldCheck className="size-4 text-primary" />
-                    Project Capabilities & Permissions for {selectedRepoFullName}
-                  </span>
-                  {permChecking ? (
-                    <Badge variant="outline" className="text-[10px] text-muted-foreground gap-1 py-0 px-2 animate-pulse">
-                      <RefreshCw className="size-2.5 animate-spin" />
-                      Checking permissions...
-                    </Badge>
-                  ) : repoPermissions?.canWrite ? (
-                    <Badge variant="outline" className="text-[10px] text-emerald-400 bg-emerald-500/15 border-emerald-500/30 gap-1 py-0 px-2">
-                      <CheckCircle2 className="size-3 text-emerald-400" />
-                      Write & Draft PR Verified
-                    </Badge>
-                  ) : repoPermissions ? (
-                    <Badge variant="outline" className="text-[10px] text-amber-400 bg-amber-500/15 border-amber-500/30 gap-1 py-0 px-2">
-                      <AlertTriangle className="size-3 text-amber-400" />
-                      Read-Only Permission
-                    </Badge>
-                  ) : null}
-                </div>
-
-                {repoPermissions && !repoPermissions.canWrite && !permChecking && (
-                  <div className="p-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-300 text-[11px] flex items-center justify-between gap-2">
+              <div className="p-4 rounded-xl border border-border/80 bg-muted/20 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/50 pb-3">
+                  <div className="space-y-0.5">
                     <div className="flex items-center gap-2">
-                      <AlertTriangle className="size-4 shrink-0 text-amber-400" />
-                      <span>
-                        Branch creation denied by GitHub for this repository. Automated fixes will run in <strong>Advisory Mode</strong> unless write permissions are granted.
+                      <ShieldCheck className="size-4 text-primary" />
+                      <span className="font-semibold text-xs text-foreground">
+                        Git Permissions & PR Authorization for <code className="text-primary font-mono">{selectedRepoFullName}</code>
                       </span>
                     </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setIsGithubConnected(false)}
-                      className="h-6 text-[10px] border-amber-500/40 text-amber-300 shrink-0"
-                    >
-                      Update Connection
-                    </Button>
+                    <p className="text-[11px] text-muted-foreground">
+                      Permission to open Pull Requests is configured specifically for this repository, not globally via OAuth.
+                    </p>
                   </div>
-                )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                  {permChecking ? (
+                    <Badge variant="outline" className="text-[10px] text-muted-foreground gap-1 py-0.5 px-2 animate-pulse self-start sm:self-auto">
+                      <RefreshCw className="size-2.5 animate-spin" />
+                      Verifying access...
+                    </Badge>
+                  ) : canDraftPR && (repoPermissions?.canWrite || repoTokenVerified) ? (
+                    <Badge variant="outline" className="text-[10px] text-emerald-400 bg-emerald-500/15 border-emerald-500/30 gap-1 py-0.5 px-2 self-start sm:self-auto">
+                      <CheckCircle2 className="size-3 text-emerald-400" />
+                      PR Permission Active
+                    </Badge>
+                  ) : !canDraftPR ? (
+                    <Badge variant="outline" className="text-[10px] text-amber-400 bg-amber-500/15 border-amber-500/30 gap-1 py-0.5 px-2 self-start sm:self-auto">
+                      <AlertTriangle className="size-3 text-amber-400" />
+                      Advisory Mode (No PRs)
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px] text-amber-400 bg-amber-500/15 border-amber-500/30 gap-1 py-0.5 px-2 self-start sm:self-auto">
+                      <Key className="size-2.5 text-amber-400" />
+                      Write Access Needed
+                    </Badge>
+                  )}
+                </div>
+
+                {/* Permission Choice: Grant PR vs Advisory Mode */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div
-                    onClick={() => setCanDraftPR(!canDraftPR)}
-                    className={`p-2.5 rounded-lg border cursor-pointer transition-colors space-y-1 ${
+                    onClick={() => setCanDraftPR(true)}
+                    className={`p-3 rounded-lg border cursor-pointer transition-all space-y-1.5 ${
                       canDraftPR
-                        ? 'border-primary/60 bg-primary/10'
-                        : 'border-border/60 bg-background/30 hover:border-border'
+                        ? 'border-primary/60 bg-primary/10 shadow-xs'
+                        : 'border-border/60 bg-background/30 hover:border-border text-muted-foreground'
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-foreground">Draft Pull Requests</span>
+                      <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <GitPullRequest className="size-3.5 text-primary" />
+                        Grant Pull Request Permission
+                      </span>
                       <input
-                        type="checkbox"
+                        type="radio"
+                        name="pr_permission"
                         checked={canDraftPR}
-                        onChange={() => {}}
-                        className="rounded border-border text-primary size-3.5"
+                        onChange={() => setCanDraftPR(true)}
+                        className="text-primary size-3.5"
                       />
                     </div>
-                    <p className="text-[10px] text-muted-foreground leading-normal">
-                      Automatically push patch branches and open draft PRs with regression proof.
+                    <p className="text-[11px] text-muted-foreground leading-normal">
+                      Allows PatchPilot to automatically create isolated patch branches and open Draft PRs with verified test proof on this repository.
                     </p>
                   </div>
 
                   <div
+                    onClick={() => setCanDraftPR(false)}
+                    className={`p-3 rounded-lg border cursor-pointer transition-all space-y-1.5 ${
+                      !canDraftPR
+                        ? 'border-primary/60 bg-primary/10 shadow-xs'
+                        : 'border-border/60 bg-background/30 hover:border-border text-muted-foreground'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <ShieldCheck className="size-3.5 text-amber-400" />
+                        Advisory Mode (No PRs)
+                      </span>
+                      <input
+                        type="radio"
+                        name="pr_permission"
+                        checked={!canDraftPR}
+                        onChange={() => setCanDraftPR(false)}
+                        className="text-primary size-3.5"
+                      />
+                    </div>
+                    <p className="text-[11px] text-muted-foreground leading-normal">
+                      PatchPilot will investigate root causes and validate fixes in Docker, but will <strong>never</strong> push code or open PRs. Diffs remain advisory.
+                    </p>
+                  </div>
+                </div>
+
+                {/* If PR permission selected: Handle verification and repo-specific token */}
+                {canDraftPR && (
+                  <div className="space-y-3 pt-1">
+                    {repoPermissions?.canWrite || repoTokenVerified ? (
+                      <div className="p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="size-4 shrink-0 text-emerald-400" />
+                          <span>
+                            Verified! Write and PR creation permissions are authorized for <strong>{selectedRepoFullName}</strong>.
+                          </span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => checkRepoPermissions(selectedRepoFullName)}
+                          className="h-6 text-[10px] text-emerald-300 hover:text-emerald-200 hover:bg-emerald-500/20"
+                        >
+                          Re-verify
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="p-3.5 rounded-lg border border-amber-500/30 bg-amber-500/10 space-y-2.5 text-xs text-amber-300">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="size-4 shrink-0 text-amber-400 mt-0.5" />
+                          <div className="space-y-1">
+                            <span className="font-semibold block text-amber-200">
+                              Repository PR Permission Authorization
+                            </span>
+                            <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                              Because GitHub was connected with read-only OAuth identity scopes (to protect all your other repositories), provide a <strong>Repository-Scoped Fine-Grained Token</strong> for this specific repository to authorize branch creation and Draft PRs.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5 pt-1">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <label className="font-medium text-foreground">
+                              Repository Token (Fine-Grained PAT for {selectedRepoFullName}):
+                            </label>
+                            <a
+                              href="https://github.com/settings/personal-access-tokens/new"
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-[10px] text-primary hover:underline flex items-center gap-1"
+                            >
+                              Generate on GitHub
+                              <ExternalLink className="size-2.5" />
+                            </a>
+                          </div>
+
+                          <div className="flex gap-2">
+                            <Input
+                              type="password"
+                              value={repoScopedToken}
+                              onChange={(e) => setRepoScopedToken(e.target.value)}
+                              placeholder="github_pat_..."
+                              className="h-8 text-xs font-mono bg-background/50 flex-1"
+                            />
+                            <Button
+                              type="button"
+                              onClick={async () => {
+                                setVerifyingRepoToken(true);
+                                await checkRepoPermissions(selectedRepoFullName, repoScopedToken);
+                                setVerifyingRepoToken(false);
+                              }}
+                              disabled={verifyingRepoToken || !repoScopedToken.trim()}
+                              className="h-8 text-xs font-medium gap-1.5 px-3 shrink-0"
+                            >
+                              {verifyingRepoToken ? <RefreshCw className="size-3 animate-spin" /> : <Key className="size-3" />}
+                              Verify & Authorize
+                            </Button>
+                          </div>
+
+                          {repoTokenError && (
+                            <p className="text-[11px] text-rose-400 font-medium pt-0.5">
+                              {repoTokenError}
+                            </p>
+                          )}
+
+                          <div className="text-[10px] text-muted-foreground space-y-0.5 pt-1">
+                            <span className="font-medium block text-foreground">Required Fine-Grained Token settings:</span>
+                            <p>• <strong>Repository access:</strong> Only select repositories → <code>{selectedRepoFullName}</code></p>
+                            <p>• <strong>Permissions:</strong> <em>Contents</em> (Read & write), <em>Pull requests</em> (Read & write)</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Additional capabilities checklist */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 border-t border-border/40">
+                  <div
                     onClick={() => setCanRunSandbox(!canRunSandbox)}
-                    className={`p-2.5 rounded-lg border cursor-pointer transition-colors space-y-1 ${
-                      canRunSandbox
-                        ? 'border-primary/60 bg-primary/10'
-                        : 'border-border/60 bg-background/30 hover:border-border'
+                    className={`p-2 rounded-lg border cursor-pointer transition-colors space-y-0.5 ${
+                      canRunSandbox ? 'border-primary/60 bg-primary/10' : 'border-border/60 bg-background/30 hover:border-border'
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold text-foreground">Sandbox Validation</span>
-                      <input
-                        type="checkbox"
-                        checked={canRunSandbox}
-                        onChange={() => {}}
-                        className="rounded border-border text-primary size-3.5"
-                      />
+                      <input type="checkbox" checked={canRunSandbox} onChange={() => {}} className="rounded border-border text-primary size-3.5" />
                     </div>
                     <p className="text-[10px] text-muted-foreground leading-normal">
                       Run isolated mutation and test suites in Docker before human review.
@@ -822,23 +1112,16 @@ export default function SetupWizardPage() {
 
                   <div
                     onClick={() => setCanInvestigate(!canInvestigate)}
-                    className={`p-2.5 rounded-lg border cursor-pointer transition-colors space-y-1 ${
-                      canInvestigate
-                        ? 'border-primary/60 bg-primary/10'
-                        : 'border-border/60 bg-background/30 hover:border-border'
+                    className={`p-2 rounded-lg border cursor-pointer transition-colors space-y-0.5 ${
+                      canInvestigate ? 'border-primary/60 bg-primary/10' : 'border-border/60 bg-background/30 hover:border-border'
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold text-foreground">Root Cause Analysis</span>
-                      <input
-                        type="checkbox"
-                        checked={canInvestigate}
-                        onChange={() => {}}
-                        className="rounded border-border text-primary size-3.5"
-                      />
+                      <input type="checkbox" checked={canInvestigate} onChange={() => {}} className="rounded border-border text-primary size-3.5" />
                     </div>
                     <p className="text-[10px] text-muted-foreground leading-normal">
-                      Hypothesis formulation and stack trace dissection via Vercel AI SDK.
+                      Hypothesis formulation and stack trace dissection via AI SDK.
                     </p>
                   </div>
                 </div>
@@ -895,10 +1178,23 @@ export default function SetupWizardPage() {
             <span className="text-[11px] font-mono text-muted-foreground">
               Target: <code className="text-primary">{repoOwner}/{repoName}</code>
             </span>
-            <Button size="sm" onClick={() => setStep(2)} className="h-8 text-xs gap-1">
-              Next: AI Model
-              <ArrowRight className="size-3" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleSaveStep(1)}
+                disabled={saving}
+                className="h-8 text-xs gap-1.5"
+              >
+                {saving ? <RefreshCw className="size-3 animate-spin" /> : <Save className="size-3" />}
+                Save Progress
+              </Button>
+              <Button size="sm" onClick={() => handleSaveStep(2)} disabled={saving} className="h-8 text-xs gap-1">
+                {saving ? <RefreshCw className="size-3 animate-spin" /> : null}
+                Next: AI Model
+                <ArrowRight className="size-3" />
+              </Button>
+            </div>
           </CardFooter>
         </Card>
       )}
@@ -1114,7 +1410,8 @@ export default function SetupWizardPage() {
                     Apply Model
                   </Button>
                 )}
-                <Button size="sm" onClick={() => setStep(3)} className="h-8 text-xs gap-1">
+                <Button size="sm" onClick={() => handleSaveStep(3)} disabled={saving} className="h-8 text-xs gap-1">
+                  {saving ? <RefreshCw className="size-3 animate-spin" /> : null}
                   Next: Sandbox
                   <ArrowRight className="size-3" />
                 </Button>
@@ -1202,6 +1499,50 @@ export default function SetupWizardPage() {
               })}
             </div>
 
+            {/* Dynamic API Key Input for Cloud Sandboxes */}
+            {(sandboxProvider === 'e2b' || sandboxProvider === 'modal') && (
+              <div className="p-3.5 rounded-lg border border-border/70 bg-muted/20 space-y-2 mt-3 animate-in fade-in-50">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Key className="size-3.5 text-primary" />
+                    <span>{sandboxProvider === 'e2b' ? 'E2B API Key' : 'Modal Token ID / Secret'}</span>
+                  </label>
+                  <a
+                    href={sandboxProvider === 'e2b' ? 'https://e2b.dev/dashboard' : 'https://modal.com/settings'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] text-primary hover:underline flex items-center gap-1"
+                  >
+                    <span>Get Key</span>
+                    <ExternalLink className="size-2.5" />
+                  </a>
+                </div>
+
+                <div className="relative">
+                  <Input
+                    type={showSandboxKey ? 'text' : 'password'}
+                    placeholder={sandboxProvider === 'e2b' ? 'e2b_...' : 'ak-...'}
+                    value={sandboxApiKey}
+                    onChange={(e) => setSandboxApiKey(e.target.value)}
+                    className="h-8 text-xs font-mono pr-8 bg-background border-border/80"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSandboxKey(!showSandboxKey)}
+                    className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showSandboxKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-muted-foreground leading-normal">
+                  {sandboxProvider === 'e2b'
+                    ? 'Required to provision isolated cloud microVMs in E2B. Stored securely per-project in SQLite.'
+                    : 'Required for Modal serverless execution compute. Stored securely per-project in SQLite.'}
+                </p>
+              </div>
+            )}
+
             <div className="p-3 bg-muted/30 border border-border/60 rounded-md text-muted-foreground space-y-1 mt-2">
               <span className="font-medium text-foreground block text-[11px]">3rd-Party & Air-Gapped Security</span>
               <p className="text-[11px] leading-relaxed">
@@ -1214,7 +1555,8 @@ export default function SetupWizardPage() {
             <Button variant="outline" size="sm" onClick={() => setStep(2)} className="h-8 text-xs gap-1">
               <ArrowLeft className="size-3" /> Back
             </Button>
-            <Button size="sm" onClick={() => setStep(4)} className="h-8 text-xs gap-1">
+            <Button size="sm" onClick={() => handleSaveStep(4)} disabled={saving} className="h-8 text-xs gap-1">
+              {saving ? <RefreshCw className="size-3 animate-spin" /> : null}
               Next: Monitoring
               <ArrowRight className="size-3" />
             </Button>
@@ -1267,7 +1609,8 @@ export default function SetupWizardPage() {
             <Button variant="outline" size="sm" onClick={() => setStep(3)} className="h-8 text-xs gap-1">
               <ArrowLeft className="size-3" /> Back
             </Button>
-            <Button size="sm" onClick={() => setStep(5)} className="h-8 text-xs gap-1">
+            <Button size="sm" onClick={() => handleSaveStep(5)} disabled={saving} className="h-8 text-xs gap-1">
+              {saving ? <RefreshCw className="size-3 animate-spin" /> : null}
               Next: Alerts
               <ArrowRight className="size-3" />
             </Button>

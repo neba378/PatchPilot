@@ -46,7 +46,38 @@ export function createApp(): Express {
     }
   }));
 
-  // 4. Health check endpoint
+  // 4. Request Logging Middleware (Detailed Debug Logging)
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const start = Date.now();
+    const requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+    logger.debug({
+      requestId,
+      method: req.method,
+      url: req.originalUrl || req.url,
+      ip: req.ip,
+      headers: {
+        'content-type': req.headers['content-type'],
+        'x-test-simulation': req.headers['x-test-simulation'],
+        'sentry-hook-signature': req.headers['sentry-hook-signature'] ? '***present***' : undefined,
+        'x-hub-signature-256': req.headers['x-hub-signature-256'] ? '***present***' : undefined,
+      }
+    }, `[HTTP IN] ${req.method} ${req.originalUrl || req.url}`);
+
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      logger.debug({
+        requestId,
+        method: req.method,
+        url: req.originalUrl || req.url,
+        statusCode: res.statusCode,
+        durationMs: duration
+      }, `[HTTP OUT] ${req.method} ${req.originalUrl || req.url} ${res.statusCode} (${duration}ms)`);
+    });
+
+    next();
+  });
+
+  // 5. Health check endpoint
   app.get('/health', (_req: Request, res: Response) => {
     res.json({
       status: 'ok',

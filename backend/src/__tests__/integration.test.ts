@@ -233,6 +233,47 @@ describe('PatchPilot Standalone Express Backend API Tests', () => {
       expect(badPatch.status).toBe(400);
     });
 
+    it('POST /api/projects supports canDraftPR toggle to configure repo PR permission', async () => {
+      const uniqueName = `Project-advisory-${Date.now().toString(36)}`;
+      const res = await request(app)
+        .post('/api/projects')
+        .set('Cookie', authCookie)
+        .send({
+          name: uniqueName,
+          repoOwner: 'patchpilot-org',
+          repoName: 'advisory-service',
+          defaultBranch: 'main',
+          canDraftPR: false
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+
+      // Verify GET /api/projects returns the policy with 'suggest' autonomyLevel
+      const listRes = await request(app)
+        .get('/api/projects')
+        .set('Cookie', authCookie);
+
+      const created = listRes.body.projects.find((p: any) => p.id === res.body.projectId);
+      expect(created).toBeDefined();
+      expect(created.policy?.autonomyLevel).toBe('suggest');
+
+      // Update PR permission to granted via PATCH
+      const patchRes = await request(app)
+        .patch(`/api/projects/${res.body.projectId}`)
+        .set('Cookie', authCookie)
+        .send({ canDraftPR: true });
+
+      expect(patchRes.status).toBe(200);
+
+      // Verify policy updated to draft_pr
+      const updatedList = await request(app)
+        .get('/api/projects')
+        .set('Cookie', authCookie);
+      const updated = updatedList.body.projects.find((p: any) => p.id === res.body.projectId);
+      expect(updated.policy?.autonomyLevel).toBe('draft_pr');
+    });
+
     it('POST /api/projects fails with 400 when missing required fields', async () => {
       const res = await request(app)
         .post('/api/projects')

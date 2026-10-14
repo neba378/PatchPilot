@@ -230,10 +230,33 @@ authRouter.get('/dev-login', async (req: Request, res: Response) => {
 // GitHub OAuth Endpoints
 // ----------------------------------------------------
 
-authRouter.get('/github/status', (req: Request, res: Response) => {
+authRouter.get('/github/status', async (req: Request, res: Response) => {
   const configured = isGitHubOAuthConfigured();
   const rawCookie = req.cookies?.[GITHUB_SESSION_COOKIE_NAME];
-  const session = decodeSessionCookie(rawCookie);
+  let session = decodeSessionCookie(rawCookie);
+
+  if (!session && process.env.GITHUB_TOKEN && process.env.GITHUB_TOKEN !== 'mock') {
+    try {
+      const user = await fetchGitHubUser(process.env.GITHUB_TOKEN);
+      const newSession: GitHubUserSession = {
+        token: process.env.GITHUB_TOKEN,
+        user,
+        connectedAt: new Date().toISOString(),
+        source: 'env'
+      };
+      session = newSession;
+      const encoded = encodeSessionCookie(newSession);
+      res.cookie(GITHUB_SESSION_COOKIE_NAME, encoded, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 7 * 24 * 3600 * 1000
+      });
+    } catch (err: any) {
+      logger.warn({ err: err.message }, '[GitHub Status] Failed to auto-connect env token');
+    }
+  }
 
   if (session && session.token && session.user) {
     return res.json({
@@ -313,17 +336,19 @@ authRouter.post('/github/token', async (req: Request, res: Response) => {
 
 authRouter.post('/github/check-permissions', async (req: Request, res: Response) => {
   try {
-    const { repo } = req.body || {};
+    const { repo, token: explicitToken } = req.body || {};
     if (!repo) {
       return res.status(400).json({ error: 'Repository name (owner/repo) is required.' });
     }
 
     const rawCookie = req.cookies?.[GITHUB_SESSION_COOKIE_NAME];
     const session = decodeSessionCookie(rawCookie);
-    const token = session?.token || (process.env.GITHUB_TOKEN !== 'mock' ? process.env.GITHUB_TOKEN : undefined);
+    const token = (typeof explicitToken === 'string' && explicitToken.trim())
+      ? explicitToken.trim()
+      : (session?.token || (process.env.GITHUB_TOKEN !== 'mock' ? process.env.GITHUB_TOKEN : undefined));
 
     if (!token) {
-      return res.status(401).json({ error: 'Not authenticated with GitHub.' });
+      return res.status(401).json({ error: 'No GitHub authentication token found. Please connect or provide a repository token.' });
     }
 
     const { Octokit } = await import('@octokit/rest');
@@ -339,6 +364,18 @@ authRouter.post('/github/check-permissions', async (req: Request, res: Response)
       const repoInfo = await octokit.rest.repos.get({ owner, repo: repoName });
       canRead = true;
       defaultBranch = repoInfo.data.default_branch || 'main';
+
+      if (repoInfo.data.permissions && repoInfo.data.permissions.push === false) {
+        canWrite = false;
+        errorMessage = 'GitHub token only has read access to this repository. Write/PR permissions are required to push fix branches and open PRs.';
+        return res.json({
+          canRead: true,
+          canWrite: false,
+          defaultBranch,
+          canDraftPR: false,
+          error: errorMessage
+        });
+      }
     } catch (e: any) {
       return res.json({ canRead: false, canWrite: false, error: `Cannot read repo: ${e.message}` });
     }

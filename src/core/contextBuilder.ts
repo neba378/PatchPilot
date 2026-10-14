@@ -35,11 +35,44 @@ export async function buildInvestigationContext(incident: Incident): Promise<Inv
   } catch {
     frames = [];
   }
-  const inAppFrames = frames.filter((f: any) => f && f.inApp);
+  const inAppFrames = frames.filter((f: any) => 
+    f && f.inApp && f.file && !f.file.startsWith('.github/') && !f.file.endsWith('.yml') && !f.file.endsWith('.yaml')
+  );
 
   let targetFiles = Array.from(new Set(inAppFrames.map((f: any) => f.file))).slice(0, 3);
   if (targetFiles.length === 0) {
-    targetFiles.push('src/paymentController.ts');
+    // Try discovering source file mentioned in error message or log excerpt
+    const textToScan = `${incident.errorMessage || ''}\n${incident.logExcerpt || ''}`;
+    const fileMatches = textToScan.match(/(src\/[a-zA-Z0-9_\-\.\/]+\.(?:ts|js|tsx|jsx))/g);
+    if (fileMatches && fileMatches.length > 0) {
+      const filtered = fileMatches.filter(f => !f.includes('.test.') && !f.includes('.spec.'));
+      if (filtered.length > 0) {
+        targetFiles.push(...filtered.slice(0, 2));
+      }
+    }
+
+    // If still empty, inspect repository snapshot for application source files
+    if (targetFiles.length === 0) {
+      try {
+        const snapshot = await repoHost.getSnapshot(repo, commitRef);
+        const sourceFile = Object.keys(snapshot).find(
+          f => f.startsWith('src/') && (f.endsWith('.ts') || f.endsWith('.js')) && !f.includes('.test.') && !f.includes('.spec.')
+        );
+        if (sourceFile) targetFiles.push(sourceFile);
+      } catch {
+        try {
+          const snapshot = await repoHost.getSnapshot(repo, 'main');
+          const sourceFile = Object.keys(snapshot).find(
+            f => f.startsWith('src/') && (f.endsWith('.ts') || f.endsWith('.js')) && !f.includes('.test.') && !f.includes('.spec.')
+          );
+          if (sourceFile) targetFiles.push(sourceFile);
+        } catch {}
+      }
+    }
+
+    if (targetFiles.length === 0) {
+      targetFiles.push('src/paymentController.ts');
+    }
   }
 
   for (const filePath of targetFiles) {

@@ -12,11 +12,13 @@ export class E2BCloudSandbox implements Sandbox {
   public id: string;
   private workDir: string;
   public apiKeyConfigured: boolean;
+  private apiKey?: string;
 
-  constructor(id: string, workDir: string, apiKeyConfigured: boolean) {
+  constructor(id: string, workDir: string, apiKeyConfigured: boolean, apiKey?: string) {
     this.id = id;
     this.workDir = workDir;
     this.apiKeyConfigured = apiKeyConfigured;
+    this.apiKey = apiKey;
   }
 
   async exec(command: string, opts?: { cwd?: string; env?: Record<string, string> }): Promise<ExecResult> {
@@ -25,7 +27,12 @@ export class E2BCloudSandbox implements Sandbox {
       const targetDir = opts?.cwd || this.workDir;
       const { stdout, stderr } = await execAsync(command, {
         cwd: targetDir,
-        env: { ...process.env, ...opts?.env, SANDBOX_RUNTIME: 'e2b-cloud' },
+        env: {
+          ...process.env,
+          ...opts?.env,
+          E2B_API_KEY: this.apiKey || process.env.E2B_API_KEY || '',
+          SANDBOX_RUNTIME: 'e2b-cloud'
+        },
         timeout: 60000
       });
       return { exitCode: 0, stdout, stderr };
@@ -66,11 +73,11 @@ export class E2BSandboxProvider implements SandboxProvider {
 
   async create(opts: SandboxCreateOptions): Promise<Sandbox> {
     const id = `sbx-e2b-${Date.now().toString(36)}`;
-    const apiKey = process.env.E2B_API_KEY;
+    const apiKey = opts.apiKey || process.env.E2B_API_KEY;
     const workDir = path.join(process.cwd(), 'temp', id);
     fs.mkdirSync(workDir, { recursive: true });
 
-    const sbx = new E2BCloudSandbox(id, workDir, Boolean(apiKey));
+    const sbx = new E2BCloudSandbox(id, workDir, Boolean(apiKey), apiKey);
 
     if (opts.files) {
       for (const [p, c] of Object.entries(opts.files)) {
@@ -78,7 +85,7 @@ export class E2BSandboxProvider implements SandboxProvider {
       }
     }
 
-    logger.info({ sandboxId: id, provider: 'e2b' }, '[E2BSandboxProvider] Spawned 3rd-party cloud sandbox');
+    logger.info({ sandboxId: id, provider: 'e2b', apiKeyConfigured: Boolean(apiKey) }, '[E2BSandboxProvider] Spawned 3rd-party cloud sandbox');
     return sbx;
   }
 }

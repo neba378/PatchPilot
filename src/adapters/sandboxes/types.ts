@@ -17,6 +17,8 @@ export interface Sandbox {
 export interface SandboxCreateOptions {
   files?: Record<string, string>;
   timeoutSeconds?: number;
+  apiKey?: string;
+  config?: Record<string, any>;
 }
 
 export interface SandboxProvider {

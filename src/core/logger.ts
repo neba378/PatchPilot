@@ -1,4 +1,14 @@
-// src/core/logger.ts
+import fs from 'fs';
+import path from 'path';
+
+const logFilePath = process.env.DEBUG_LOG_PATH || path.join(process.cwd(), 'logs', 'debug-trace.log');
+
+try {
+  const dir = path.dirname(logFilePath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+} catch {}
 
 function formatLog(level: string, arg1: any, arg2?: any) {
   const timestamp = new Date().toISOString();
@@ -16,8 +26,18 @@ function formatLog(level: string, arg1: any, arg2?: any) {
     msg = meta.message || '';
   }
 
-  const metaStr = Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : '';
+  // Format meta if present
+  let metaStr = '';
+  if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
+    try {
+      metaStr = ` ${JSON.stringify(meta)}`;
+    } catch {
+      metaStr = ' [Circular / Unserializable Meta]';
+    }
+  }
+
   const line = `[${timestamp}] [${level.toUpperCase()}] ${msg}${metaStr}`;
+
   if (level === 'error') {
     console.error(line);
   } else if (level === 'warn') {
@@ -25,6 +45,10 @@ function formatLog(level: string, arg1: any, arg2?: any) {
   } else {
     console.log(line);
   }
+
+  try {
+    fs.appendFileSync(logFilePath, line + '\n', 'utf-8');
+  } catch {}
 }
 
 export const logger = {
@@ -33,3 +57,4 @@ export const logger = {
   error: (arg1: any, arg2?: any) => formatLog('error', arg1, arg2),
   debug: (arg1: any, arg2?: any) => formatLog('debug', arg1, arg2),
 };
+

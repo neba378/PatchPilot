@@ -1,0 +1,21 @@
+{
+  "name": "demo-order-service",
+  "version": "1.0.0",
+  "description": "Sample order fulfillment service instrumented with Sentry for PatchPilot demonstration",
+  "main": "src/orderController.ts",
+  "scripts": {
+    "test": "vitest run",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "start": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@sentry/node": "^11.7.0",
+    "express": "^4.19.2",
+    "tsx": "^4.19.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}

@@ -12,11 +12,13 @@ export class ModalCloudSandbox implements Sandbox {
   public id: string;
   private workDir: string;
   public tokenConfigured: boolean;
+  private tokenId?: string;
 
-  constructor(id: string, workDir: string, tokenConfigured: boolean) {
+  constructor(id: string, workDir: string, tokenConfigured: boolean, tokenId?: string) {
     this.id = id;
     this.workDir = workDir;
     this.tokenConfigured = tokenConfigured;
+    this.tokenId = tokenId;
   }
 
   async exec(command: string, opts?: { cwd?: string; env?: Record<string, string> }): Promise<ExecResult> {
@@ -25,7 +27,12 @@ export class ModalCloudSandbox implements Sandbox {
       const targetDir = opts?.cwd || this.workDir;
       const { stdout, stderr } = await execAsync(command, {
         cwd: targetDir,
-        env: { ...process.env, ...opts?.env, SANDBOX_RUNTIME: 'modal-cloud' },
+        env: {
+          ...process.env,
+          ...opts?.env,
+          MODAL_TOKEN_ID: this.tokenId || process.env.MODAL_TOKEN_ID || '',
+          SANDBOX_RUNTIME: 'modal-cloud'
+        },
         timeout: 60000
       });
       return { exitCode: 0, stdout, stderr };
@@ -66,11 +73,11 @@ export class ModalSandboxProvider implements SandboxProvider {
 
   async create(opts: SandboxCreateOptions): Promise<Sandbox> {
     const id = `sbx-modal-${Date.now().toString(36)}`;
-    const tokenId = process.env.MODAL_TOKEN_ID;
+    const tokenId = opts.apiKey || process.env.MODAL_TOKEN_ID;
     const workDir = path.join(process.cwd(), 'temp', id);
     fs.mkdirSync(workDir, { recursive: true });
 
-    const sbx = new ModalCloudSandbox(id, workDir, Boolean(tokenId));
+    const sbx = new ModalCloudSandbox(id, workDir, Boolean(tokenId), tokenId);
 
     if (opts.files) {
       for (const [p, c] of Object.entries(opts.files)) {
@@ -78,7 +85,7 @@ export class ModalSandboxProvider implements SandboxProvider {
       }
     }
 
-    logger.info({ sandboxId: id, provider: 'modal' }, '[ModalSandboxProvider] Spawned 3rd-party Modal container');
+    logger.info({ sandboxId: id, provider: 'modal', tokenConfigured: Boolean(tokenId) }, '[ModalSandboxProvider] Spawned 3rd-party Modal container');
     return sbx;
   }
 }

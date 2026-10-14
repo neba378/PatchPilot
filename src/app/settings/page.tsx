@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Shield, Check, Save, Cpu, Sparkles, Bot, Zap, SlidersHorizontal, ExternalLink, Key, Boxes } from 'lucide-react';
+import { Shield, Check, Save, Cpu, Sparkles, Bot, Zap, SlidersHorizontal, ExternalLink, Key, Boxes, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,11 @@ export default function SettingsPage() {
   const [customModelInput, setCustomModelInput] = useState<string>('');
   const [aiApiKey, setAiApiKey] = useState<string>('');
 
+  // Sandbox State
+  const [sandboxProvider, setSandboxProvider] = useState<'local-docker' | 'e2b' | 'modal' | 'fake'>('local-docker');
+  const [sandboxApiKey, setSandboxApiKey] = useState<string>('');
+  const [showSandboxKey, setShowSandboxKey] = useState<boolean>(false);
+
   useEffect(() => {
     async function loadProjects() {
       try {
@@ -32,6 +37,18 @@ export default function SettingsPage() {
           setProjectsList(data.projects);
           const defaultPrj = data.projects[0];
           setSelectedProjectId(defaultPrj.id);
+
+          if (defaultPrj.sandboxProvider) {
+            setSandboxProvider(defaultPrj.sandboxProvider);
+          }
+          if (defaultPrj.sandboxApiKey) {
+            setSandboxApiKey(defaultPrj.sandboxApiKey);
+          } else {
+            setSandboxApiKey('');
+          }
+          if (defaultPrj.policy?.autonomyLevel) {
+            setAutonomyLevel(defaultPrj.policy.autonomyLevel);
+          }
 
           const aiConn = defaultPrj.connections?.find((c: any) =>
             ['gemini', 'openai', 'anthropic', 'gateway', 'ai'].includes(c.type)
@@ -63,6 +80,20 @@ export default function SettingsPage() {
     setSelectedProjectId(projectId);
     const prj = projectsList.find(p => p.id === projectId);
     if (prj) {
+      if (prj.sandboxProvider) {
+        setSandboxProvider(prj.sandboxProvider);
+      } else {
+        setSandboxProvider('local-docker');
+      }
+      if (prj.sandboxApiKey) {
+        setSandboxApiKey(prj.sandboxApiKey);
+      } else {
+        setSandboxApiKey('');
+      }
+      if (prj.policy?.autonomyLevel) {
+        setAutonomyLevel(prj.policy.autonomyLevel);
+      }
+
       const aiConn = prj.connections?.find((c: any) =>
         ['gemini', 'openai', 'anthropic', 'gateway', 'ai'].includes(c.type)
       );
@@ -95,12 +126,23 @@ export default function SettingsPage() {
             projectId: selectedProjectId,
             aiProvider,
             aiModel: effectiveModel,
-            aiApiKey: aiApiKey || undefined
+            aiApiKey: aiApiKey || undefined,
+            autonomyLevel,
+            sandboxProvider,
+            sandboxApiKey: sandboxApiKey.trim() || null
           })
         });
+
+        // Update local state list
+        setProjectsList(prev => prev.map(p => p.id === selectedProjectId ? {
+          ...p,
+          sandboxProvider,
+          sandboxApiKey: sandboxApiKey.trim() || undefined,
+          policy: { ...p.policy, autonomyLevel }
+        } : p));
       }
       setSaved(true);
-      setSaveMessage(`Saved! Active model set to ${effectiveModel}.`);
+      setSaveMessage(`Saved! Settings and sandbox (${sandboxProvider}) updated.`);
       setTimeout(() => {
         setSaved(false);
         setSaveMessage(null);
@@ -438,55 +480,134 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
               <Boxes className="size-4 text-primary" />
-              Supported Execution Sandboxes
+              Execution Sandbox & Isolation Environment
             </CardTitle>
-            <Badge variant="outline" className="text-[10px] text-muted-foreground font-mono">
-              Default: Local Docker
-            </Badge>
+            <div className="flex items-center gap-1.5">
+              <Badge variant="outline" className="text-[10px] text-primary border-primary/40 font-mono">
+                Active: {sandboxProvider}
+              </Badge>
+              {(sandboxProvider === 'e2b' || sandboxProvider === 'modal') && (
+                <Badge
+                  variant="outline"
+                  className={`text-[9px] py-0 px-1 font-sans ${
+                    sandboxApiKey
+                      ? 'border-emerald-500/50 text-emerald-400 bg-emerald-500/10'
+                      : 'border-amber-500/50 text-amber-400 bg-amber-500/10'
+                  }`}
+                >
+                  {sandboxApiKey ? 'Key Configured' : 'API Key Required'}
+                </Badge>
+              )}
+            </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            Isolated environments used to reproduce stack traces and verify candidate patches. Configurable per project.
+            Isolated environment used to reproduce bug stack traces, author regression tests, and execute mutation checks before opening Pull Requests.
           </p>
         </CardHeader>
 
-        <CardContent className="p-4 sm:p-5 pt-0">
+        <CardContent className="p-4 sm:p-5 pt-0 space-y-4 text-xs">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             {[
               {
                 id: 'local-docker',
                 name: 'Local Docker',
-                badge: 'Default',
-                desc: 'Runs test execution in local Docker container with volume isolation.'
+                badge: 'Container (Default)',
+                desc: 'Runs test execution in local Docker container with volume isolation. Zero external API cost.'
               },
               {
                 id: 'e2b',
                 name: 'E2B Sandbox',
-                badge: '3rd Party Cloud',
-                desc: 'Secure cloud microVMs with dedicated compute per investigation.'
+                badge: '3rd Party Cloud MicroVM',
+                desc: 'Secure cloud microVMs with dedicated compute per investigation. Ideal for untrusted CI runs.'
               },
               {
                 id: 'modal',
                 name: 'Modal Labs',
-                badge: '3rd Party Cloud',
+                badge: 'Serverless Cloud',
                 desc: 'Elastic serverless cloud container infrastructure with on-demand scaling.'
               },
               {
                 id: 'fake',
                 name: 'In-Memory Simulation',
-                badge: 'Mock',
+                badge: 'Dry Run Mock',
                 desc: 'Fast offline dry-run simulation without spinning up real containers.'
               }
-            ].map((p) => (
-              <div key={p.id} className="p-3 bg-muted/20 rounded-lg border border-border/50 space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-foreground font-mono text-xs">{p.name}</span>
-                  <Badge variant="outline" className="text-[9px] py-0 px-1 border-border/60">
-                    {p.badge}
-                  </Badge>
+            ].map((p) => {
+              const isSelected = sandboxProvider === p.id;
+              return (
+                <div
+                  key={p.id}
+                  onClick={() => setSandboxProvider(p.id as any)}
+                  className={`p-3.5 rounded-lg border cursor-pointer transition-all space-y-1.5 ${
+                    isSelected
+                      ? 'border-primary bg-primary/10 ring-1 ring-primary/40 shadow-sm'
+                      : 'border-border/60 bg-muted/20 hover:border-border hover:bg-muted/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`font-semibold font-mono text-xs ${isSelected ? 'text-primary' : 'text-foreground'}`}>
+                        {p.name}
+                      </span>
+                      <Badge variant="outline" className="text-[9px] py-0 px-1 border-border/60">
+                        {p.badge}
+                      </Badge>
+                    </div>
+                    {isSelected && <Check className="size-3.5 text-primary" />}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">{p.desc}</p>
                 </div>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">{p.desc}</p>
+              );
+            })}
+          </div>
+
+          {/* Dynamic API Key Input for Cloud Sandboxes */}
+          {(sandboxProvider === 'e2b' || sandboxProvider === 'modal') && (
+            <div className="p-3.5 rounded-lg border border-border/70 bg-muted/20 space-y-2 animate-in fade-in-50">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <Key className="size-3.5 text-primary" />
+                  <span>{sandboxProvider === 'e2b' ? 'E2B API Key' : 'Modal Token ID / Secret'}</span>
+                </label>
+                <a
+                  href={sandboxProvider === 'e2b' ? 'https://e2b.dev/dashboard' : 'https://modal.com/settings'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] text-primary hover:underline flex items-center gap-1"
+                >
+                  <span>Get Key</span>
+                  <ExternalLink className="size-2.5" />
+                </a>
               </div>
-            ))}
+
+              <div className="relative">
+                <Input
+                  type={showSandboxKey ? 'text' : 'password'}
+                  placeholder={sandboxProvider === 'e2b' ? 'e2b_...' : 'ak-...'}
+                  value={sandboxApiKey}
+                  onChange={(e) => setSandboxApiKey(e.target.value)}
+                  className="h-8 text-xs font-mono pr-8 bg-background border-border/80"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSandboxKey(!showSandboxKey)}
+                  className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+                >
+                  {showSandboxKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
+
+              <p className="text-[11px] text-muted-foreground leading-normal">
+                {sandboxProvider === 'e2b'
+                  ? 'Required to spawn secure cloud microVMs on E2B. Keys are encrypted and saved per-project in your SQLite database.'
+                  : 'Required for Modal serverless container execution. Stored securely per-project in SQLite.'}
+              </p>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 p-2.5 rounded-md bg-muted/20 border border-border/50 text-[11px] text-muted-foreground">
+            <ShieldCheck className="size-3.5 text-primary shrink-0" />
+            <span>Air-Gapped Security: Code is mounted into the sandbox as a snapshot. GitHub tokens are NEVER passed into the sandbox runtime.</span>
           </div>
         </CardContent>
       </Card>

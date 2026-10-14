@@ -31,9 +31,11 @@ projectsRouter.get('/', async (_req: Request, res: Response) => {
   try {
     const allProjects = await db.select().from(projects).orderBy(desc(projects.createdAt));
     const allConnections = await db.select().from(connections);
+    const allPolicies = await db.select().from(policies);
 
     const enriched = allProjects.map(p => ({
       ...p,
+      policy: allPolicies.find(pol => pol.projectId === p.id) || null,
       connections: allConnections.filter(c => c.projectId === p.id).map(c => ({
         id: c.id,
         type: c.type,
@@ -58,6 +60,7 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
       repoName,
       defaultBranch = 'main',
       sandboxProvider = 'local-docker',
+      sandboxApiKey,
       githubToken,
       aiProvider = 'gemini',
       aiModel,
@@ -81,20 +84,42 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
 
     const now = new Date().toISOString();
 
-    // Check if project already exists
+    // A project is uniquely tied to its repository (repoOwner/repoName).
+    // Only update an existing project if it matches the same repository!
     const existingProject = body.projectId
-      ? await db.select().from(projects).where(eq(projects.id, body.projectId)).get()
+      ? await db.select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.repoOwner, repoOwner), eq(projects.repoName, repoName))).get()
       : await db.select().from(projects).where(and(eq(projects.repoOwner, repoOwner), eq(projects.repoName, repoName))).get();
 
     const projectId = existingProject ? existingProject.id : `proj_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now().toString(36)}`;
+
+    const autonomyLevel = body.canDraftPR === false ? 'suggest' : (body.autonomyLevel || 'draft_pr');
 
     if (existingProject) {
       await db.update(projects).set({
         name,
         defaultBranch,
         sandboxProvider: chosenSandbox,
+        ...(sandboxApiKey !== undefined ? { sandboxApiKey } : {}),
         updatedAt: now
       }).where(eq(projects.id, projectId));
+
+      const existingPolicy = await db.select().from(policies).where(eq(policies.projectId, projectId)).get();
+      if (existingPolicy) {
+        await db.update(policies).set({ autonomyLevel }).where(eq(policies.projectId, projectId));
+      } else {
+        await db.insert(policies).values({
+          id: `POL-${projectId}`,
+          projectId,
+          autonomyLevel,
+          protectedPaths: '["migrations/**", "infra/**", ".github/**", "security/**", ".env"]',
+          maxChangedFiles: 3,
+          maxChangedLines: 60,
+          modelCallBudget: 10,
+          sandboxTimeoutSeconds: 180,
+          maxRetries: 2,
+          circuitBreakerTripped: false
+        });
+      }
     } else {
       // 1. Create Project
       await db.insert(projects).values({
@@ -104,12 +129,12 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
         repoName,
         defaultBranch,
         sandboxProvider: chosenSandbox,
+        sandboxApiKey: sandboxApiKey || null,
         createdAt: now,
         updatedAt: now
       });
 
       // 2. Initialize Policy
-      const autonomyLevel = body.canDraftPR === false ? 'suggest' : (body.autonomyLevel || 'draft_pr');
       await db.insert(policies).values({
         id: `POL-${projectId}`,
         projectId,
@@ -128,7 +153,9 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
     const connList: any[] = [];
     const rawSessionCookie = req.cookies?.[GITHUB_SESSION_COOKIE_NAME];
     const session = decodeSessionCookie(rawSessionCookie);
-    const effectiveGithubToken = githubToken || session?.token || (process.env.GITHUB_TOKEN !== 'mock' ? process.env.GITHUB_TOKEN : undefined);
+    const effectiveGithubToken = (typeof githubToken === 'string' && githubToken.trim())
+      ? githubToken.trim()
+      : (session?.token || (process.env.GITHUB_TOKEN !== 'mock' ? process.env.GITHUB_TOKEN : undefined));
 
     if (effectiveGithubToken) {
       if (existingProject) {
@@ -142,7 +169,8 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
         metadata: JSON.stringify({
           repo: `${repoOwner}/${repoName}`,
           defaultBranch,
-          connectedVia: session ? session.source : (githubToken ? 'token' : 'env'),
+          connectedVia: githubToken ? 'repo_token' : (session ? session.source : 'env'),
+          canDraftPR: body.canDraftPR !== false,
           username: session?.user?.login || repoOwner
         }),
         createdAt: now
@@ -221,7 +249,18 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
 const handlePatchProject = async (req: Request, res: Response) => {
   try {
     const id = req.params.id || req.body?.projectId;
-    const { sandboxProvider, name, defaultBranch, aiProvider, aiModel, aiApiKey } = req.body || {};
+    const {
+      sandboxProvider,
+      sandboxApiKey,
+      name,
+      defaultBranch,
+      aiProvider,
+      aiModel,
+      aiApiKey,
+      canDraftPR,
+      autonomyLevel,
+      githubToken
+    } = req.body || {};
 
     if (!id) {
       return res.status(400).json({ error: 'Project ID is required' });
@@ -245,10 +284,64 @@ const handlePatchProject = async (req: Request, res: Response) => {
       updates.sandboxProvider = sandboxProvider;
     }
 
+    if (sandboxApiKey !== undefined) {
+      updates.sandboxApiKey = sandboxApiKey;
+    }
+
     if (name) updates.name = name;
     if (defaultBranch) updates.defaultBranch = defaultBranch;
 
     await db.update(projects).set(updates).where(eq(projects.id, id));
+
+    // Update Policy if canDraftPR or autonomyLevel provided
+    const newAutonomy = canDraftPR === false ? 'suggest' : (autonomyLevel || (canDraftPR === true ? 'draft_pr' : undefined));
+    if (newAutonomy) {
+      const existingPolicy = await db.select().from(policies).where(eq(policies.projectId, id)).get();
+      if (existingPolicy) {
+        await db.update(policies).set({ autonomyLevel: newAutonomy }).where(eq(policies.projectId, id));
+      } else {
+        await db.insert(policies).values({
+          id: `POL-${id}`,
+          projectId: id,
+          autonomyLevel: newAutonomy,
+          protectedPaths: '["migrations/**", "infra/**", ".github/**", "security/**", ".env"]',
+          maxChangedFiles: 3,
+          maxChangedLines: 60,
+          modelCallBudget: 10,
+          sandboxTimeoutSeconds: 180,
+          maxRetries: 2,
+          circuitBreakerTripped: false
+        });
+      }
+    }
+
+    // Update GitHub Connection if a repo token or permission change is provided
+    if (githubToken || canDraftPR !== undefined) {
+      const existingGhConn = await db.select().from(connections)
+        .where(and(eq(connections.projectId, id), eq(connections.type, 'github')))
+        .get();
+
+      const existingMeta = existingGhConn ? JSON.parse(existingGhConn.metadata || '{}') : {};
+      const updatedToken = (typeof githubToken === 'string' && githubToken.trim()) ? githubToken.trim() : existingGhConn?.encryptedSecret;
+
+      if (updatedToken) {
+        await db.delete(connections).where(and(eq(connections.projectId, id), eq(connections.type, 'github')));
+        await db.insert(connections).values({
+          id: existingGhConn?.id || `conn_gh_${Date.now().toString(36)}`,
+          projectId: id,
+          type: 'github',
+          encryptedSecret: updatedToken,
+          metadata: JSON.stringify({
+            ...existingMeta,
+            repo: `${project.repoOwner}/${project.repoName}`,
+            defaultBranch: defaultBranch || project.defaultBranch,
+            connectedVia: githubToken ? 'repo_token' : (existingMeta.connectedVia || 'token'),
+            canDraftPR: canDraftPR !== false
+          }),
+          createdAt: existingGhConn?.createdAt || now
+        });
+      }
+    }
 
     if (aiProvider || aiModel || aiApiKey) {
       const chosenProvider = aiProvider || 'gemini';
