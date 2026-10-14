@@ -1,114 +1,107 @@
 # PatchPilot Design System Specification
 
-> **Version**: 1.1.0  
+> **Version**: 1.2.0  
 > **Status**: Approved & Canonical  
-> **Selected Palette**: **Graphite & Safety Amber** (Industrial SRE Reliability)  
-> **Target**: PatchPilot Autonomous SRE & DevSecOps Platform  
+> **Default Theme**: **Cobalt Slate** (High-Contrast SRE Operations)  
 > **Framework**: Next.js 15, Tailwind CSS, shadcn/ui, Radix UI Primitives  
 
 ---
 
-## 1. Design Philosophy & SRE Identity
+## 1. Design Principles
 
-PatchPilot is an **autonomous, mission-critical incident remediation platform**. SRE and DevOps engineers rely on it during high-stress production outages. The design system prioritizes:
-
-1. **Information Density without Clutter**: High-speed triage requires glanceable status indicators, compact data tables, and structured telemetry cards.
-2. **High-Contrast Legibility (WCAG AAA)**: Text, badges, and code diffs maintain high contrast (`> 12:1` on headers, `> 8.5:1` on telemetry) against deep slate-graphite surfaces, avoiding alert fatigue and washed-out grays.
-3. **Safety Amber Priority**: Amber is the primary action and focus color (`#F59E0B`), symbolizing human-in-the-loop governance, circuit breakers, and vigilant incident command.
-4. **Calm Supporting Accents**:
-   - Sky-Blue (`#38BDF8`) for automated PRs and agent workflows.
-   - Precision Emerald (`#34D399`) for verified sandbox tests and passing mutations.
-   - High-Salience Red/Rose (`#F87171`) for critical production 500 faults.
-5. **Standardized shadcn Spacing**: Built on the proven, accessible 4px grid of shadcn/ui to ensure seamless drop-in blocks and future extension.
+1. **Information Density & Glanceability**: Engineers in an incident require immediate comprehension. Data is presented cleanly without unnecessary decoration or visual clutter.
+2. **Restrained Color Distribution**: A single, refined primary accent (Cobalt `#3b82f6`) anchors interactive elements. Semantic colors (Emerald, Amber, Rose) are strictly reserved for communicating operational state—never as decorative rainbow accents.
+3. **High-Contrast Legibility**: Deep dark slate surfaces (`#0a0d14` background, `#111622` card) paired with high-contrast foreground text (`#f8fafc`, `>14:1` contrast ratio) prevent eye fatigue during high-stress operations.
+4. **Concise Product Copy**: Titles, subtitles, and labels use crisp, professional engineering terminology. Redundant labels, academic jargon, and obvious descriptions are eliminated.
+5. **Standardized shadcn Spacing**: Strict adherence to the standard 4px Tailwind / shadcn spacing scale for seamless component integration.
 
 ---
 
-## 2. Spacing & Layout Architecture
+## 2. Color Palette & Distribution
 
-We adhere strictly to the standard **shadcn/ui 4px spacing scale** (Tailwind CSS defaults):
-
-| Token | Size | Rem | Primary Usage |
+### Surface & Border Tokens
+| Role | CSS Variable | Hex Equivalent | Usage |
 | :--- | :--- | :--- | :--- |
-| `0.5` | 2px | 0.125rem | Micro-offsets, border indicators, badge padding |
-| `1` | 4px | 0.25rem | Compact item gap, badge horizontal padding |
-| `1.5` | 6px | 0.375rem | Button icon spacing, table cell compact gap |
-| `2` | 8px | 0.5rem | Input vertical padding, card sub-element gap |
-| `2.5` | 10px | 0.625rem | Button vertical padding |
-| `3` | 12px | 0.75rem | Card header gap, dropdown padding |
-| `4` | 16px | 1.0rem | Standard card inner padding, grid gap |
-| `5` | 20px | 1.25rem | Dashboard section spacing |
-| `6` | 24px | 1.5rem | Page header padding, large card content |
-| `8` | 32px | 2.0rem | Major section separation |
+| **Canvas Background** | `--background: 224 35% 6%` | `#0a0d14` | Root background |
+| **Card Surface** | `--card: 224 30% 9.5%` | `#111622` | Cards, tables, modals |
+| **Hover / Secondary** | `--secondary: 224 25% 15%` | `#1d2436` | Active filters, hovered items |
+| **Muted Surface** | `--muted: 224 25% 13%` | `#181e2e` | Table headers, code blocks |
+| **Subtle Border** | `--border: 224 20% 16%` | `#202738` | Dividers, card outlines |
+| **Primary Text** | `--foreground: 210 40% 98%` | `#f8fafc` | Primary titles, values |
+| **Muted Text** | `--muted-foreground: 215 20% 65%` | `#94a3b8` | Metadata, subtitles, column headers |
 
-### Grid & Layout Rules
-- **Sidebar Width**: `16rem` (`256px`) expanded, `3.25rem` (`52px`) icon-only collapsed.
-- **Max Content Width**: `80rem` (`1280px` / `max-w-7xl`) for dashboard grids and data tables.
-- **Card Radius**: `0.625rem` (`10px` / `rounded-xl`) with `1px` border (`border-border`).
+### Interactive & Brand Accent
+| Role | CSS Variable | Hex Equivalent | Usage |
+| :--- | :--- | :--- | :--- |
+| **Primary CTA** | `--primary: 217 91% 60%` | `#3b82f6` | Primary action buttons, active navigation indicator |
+| **Focus Ring** | `--ring: 217 91% 60%` | `#3b82f6` | Keyboard focus outlines |
+
+### Semantic State Tokens (Used Strictly for Status)
+| State | Text & Border Class | Background Class | Typical Use |
+| :--- | :--- | :--- | :--- |
+| **Resolved / Healthy** | `text-emerald-400` | `bg-emerald-500/10 border-emerald-500/20` | Verified patches, 100% pass rates, active status |
+| **Needs Review / Warning** | `text-amber-400` | `bg-amber-500/10 border-amber-500/20` | Incidents requiring human sign-off |
+| **Remediating / Active** | `text-blue-400` | `bg-blue-500/10 border-blue-500/20` | Active sandbox runs, open draft PRs |
+| **Critical / Fault** | `text-rose-400` | `bg-rose-500/10 border-rose-500/20` | 500 runtime exceptions, blocked paths |
+| **Neutral / Abstained** | `text-muted-foreground` | `bg-muted border-border` | Abstained incidents, inactive monitors |
 
 ---
 
 ## 3. Typography & Contrast Hierarchy
 
 ### Font Families
-- **Primary Sans**: `Geist Sans`, `Inter`, `-apple-system`, `BlinkMacSystemFont`, `"Segoe UI"`, `Roboto`, `sans-serif`
-  - High x-height, clear differentiation between `0`/`O` and `1`/`l`/`I`.
-  - Feature settings: `"rlig" 1, "calt" 1, "cv02", "cv03", "cv04"`.
-- **Monospace Telemetry**: `JetBrains Mono`, `Geist Mono`, `Fira Code`, `monospace`
-  - Used for incident fingerprints, commit hashes, code diffs, logs, timestamps, and metric values.
-  - Tabular numbers enabled: `font-variant-numeric: tabular-nums`.
+- **Primary Sans**: `Geist Sans`, `Inter`, `-apple-system`, `BlinkMacSystemFont`, `sans-serif`
+  - High legibility, crisp letter rendering at small sizes (`11px` - `13px`).
+  - Feature settings: `cv02`, `cv03`, `cv04`, `cv11`. Letter spacing: `-0.01em`.
+- **Telemetry Monospace**: `Geist Mono`, `JetBrains Mono`, `Fira Code`, `monospace`
+  - Used for code diffs, fingerprints, commit SHAs, timestamps, and metric figures.
+  - Numeric alignment: `font-variant-numeric: tabular-nums`.
 
-### Type Scale & Leading
-| Role | Class | Size / Leading | Weight | Tracking | Contrast vs Surface |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Page Title** | `text-2xl` | 24px / 32px | Bold (700) | `-0.025em` (tight) | `14.8:1` (WCAG AAA) |
-| **Section Title** | `text-base` | 16px / 24px | SemiBold (600) | `-0.015em` | `13.5:1` (WCAG AAA) |
-| **KPI Numbers** | `text-2xl font-mono` | 24px / 28px | Bold (700) | `-0.02em` | `14.0:1` (WCAG AAA) |
-| **Body Primary** | `text-sm` | 14px / 20px | Medium (500) | `normal` | `12.5:1` (WCAG AAA) |
-| **Subtext / Table** | `text-xs` | 12px / 16px | Medium (500) | `normal` | `10.2:1` (WCAG AAA) |
-| **Micro Labels** | `text-[10px]` | 10px / 14px | SemiBold (600) | `+0.05em` | `8.7:1` (WCAG AAA) |
+### Type Scale
+| Role | Tailwind Classes | Size / Leading | Weight | Usage |
+| :--- | :--- | :--- | :--- | :--- |
+| **Page Title** | `text-xl font-bold tracking-tight` | 20px / 28px | 700 | Main header on each view |
+| **Card Header** | `text-sm font-semibold` | 14px / 20px | 600 | Card titles, section headers |
+| **Metric Figure** | `text-2xl font-bold font-mono` | 24px / 28px | 700 | KPI summary values |
+| **Body / Row Text** | `text-xs font-medium` | 12px / 16px | 500 | Incident titles, table row items |
+| **Metadata / Subtitle**| `text-xs text-muted-foreground` | 12px / 16px | 400 | Page subtitles, relative times |
+| **Micro Monospace** | `text-[11px] font-mono text-muted-foreground`| 11px / 14px | 400 | Code paths, hashes, environments |
 
 ---
 
-## 4. Canonical Color Palette: "Graphite & Safety Amber"
+## 4. Spacing & Layout Architecture
 
-### Core Tokens
-| Role | CSS Token | Hex Equivalent | Usage |
+Strict adherence to the standard **shadcn/ui 4px spacing scale**:
+
+| Token | Pixels | Rem | Usage |
 | :--- | :--- | :--- | :--- |
-| **Canvas Background** | `hsl(222, 47%, 9%)` | `#0B1322` | Root app background |
-| **Card Surface** | `hsl(217, 33%, 14%)` | `#172134` | Cards, table containers, modals |
-| **Primary Action** | `hsl(38, 92%, 50%)` | `#F59E0B` | Buttons, active navigation, key focus rings |
-| **Primary Foreground** | `hsl(38, 95%, 8%)` | `#261603` | Text on amber buttons (high contrast) |
-| **Secondary Surface** | `hsl(217, 25%, 19%)` | `#222E44` | Inactive tabs, hover fills, inputs |
-| **Muted Surface** | `hsl(217, 25%, 16%)` | `#1D273B` | Table headers, secondary badges |
-| **Muted Text** | `hsl(215, 20%, 72%)` | `#A0AEC0` | Metadata, timestamps, secondary labels |
-| **Borders & Dividers** | `hsl(217, 25%, 21%)` | `#28364F` | Card outlines, table rows, separators |
+| `p-1` / `gap-1` | 4px | 0.25rem | Filter button gaps, badge inner padding |
+| `p-1.5` / `gap-1.5` | 6px | 0.375rem | Button internal padding, inline badge spacing |
+| `p-2` / `gap-2` | 8px | 0.5rem | Small control gaps, input vertical padding |
+| `p-3` / `gap-3` | 12px | 0.75rem | Card sub-sections, compact list gaps |
+| `p-4` / `gap-4` | 16px | 1.0rem | Standard card internal padding, table cell padding |
+| `p-5` / `gap-5` | 20px | 1.25rem | Major card padding |
+| `space-y-6` | 24px | 1.5rem | Vertical spacing between page sections |
 
-### Status Semantic Signals
-- **Critical / Fault**: `#F87171` (`Red-400` / `bg-red-500/15 text-red-400 border-red-500/30`)
-- **Awaiting Approval**: `#F59E0B` (`Amber-500` / `bg-amber-500/15 text-amber-400 border-amber-500/30`)
-- **Verified / Passed**: `#34D399` (`Emerald-400` / `bg-emerald-500/15 text-emerald-400 border-emerald-500/30`)
-- **Draft PR / Telemetry**: `#38BDF8` (`Sky-400` / `bg-sky-500/15 text-sky-400 border-sky-500/30`)
-- **Abstained (Policy)**: `#C084FC` (`Purple-400` / `bg-purple-500/15 text-purple-400 border-purple-500/30`)
-
-### Sidebar Tokens
-- **Sidebar Background**: `hsl(222, 47%, 7.5%)` (`#09101C`)
-- **Sidebar Foreground**: `hsl(215, 20%, 75%)` (`#A8B6C8`)
-- **Sidebar Accent**: `hsl(217, 25%, 15%)` (`#1B2538`)
-- **Sidebar Border**: `hsl(217, 25%, 17%)` (`#202C42`)
-- **Sidebar Ring**: `hsl(38, 92%, 50%)` (`#F59E0B`)
+### Layout Rules
+- **Header**: Fixed `h-14` (56px) with breadcrumbs and live system status indicator.
+- **Sidebar**: Collapsible `16rem` (256px) expanded, `3rem` (48px) collapsed.
+- **Main Container**: `max-w-7xl` centered with `p-4 md:p-6` padding.
+- **Card Corners**: `rounded-lg` (8px / `0.5rem`).
 
 ---
 
-## 5. Alternative Switcher Palettes Preserved
+## 5. Product Copy & Tone Guidelines
 
-The platform maintains the theme engine allowing operators to toggle alternative calibrated palettes if desired:
-1. **Obsidian & Electric Cobalt** (High-tech navy/cyan cockpit)
-2. **Zinc & Indigo Linear** (Minimalist monochrome developer aesthetic)
-3. **Cyber Emerald & NOC** (Phosphor terminal mission control)
-4. **Graphite & Safety Amber** (Canonical default)
-
----
-
-## 6. Implementation Architecture
-
-All tokens map directly to CSS variables defined in [`src/app/globals.css`](file:///home/nebiyu/.gemini/antigravity/worktrees/PatchPilot/rebuild_ui_shard_scene/src/app/globals.css) and are consumed via standard Tailwind utility classes (`bg-background`, `bg-card`, `bg-primary`, `text-primary`, `border-border`).
+1. **Short, Action-Oriented Titles**:
+   - ✅ `Incidents` (not `Incident Operations & Autonomous Remediation Dashboard`)
+   - ✅ `Benchmarks` (not `Evaluation Harness & Benchmark Results Suite`)
+   - ✅ `Settings` (not `Governance & Safety Policy Configuration Management`)
+   - ✅ `Integrations` (not `Repository & AI Model Setup Wizard`)
+2. **Concise Subtitles**:
+   - Maximum 1 line, describing the function without marketing buzzwords.
+   - Example: `Automated triage, root cause analysis, and draft PRs.`
+3. **No Redundant Subtitle Clutter on Cards**:
+   - When a KPI card says `Total Incidents` and displays `14`, avoid adding redundant explanatory text like `All ingested signals across production`.
+4. **Clear Action Triggers**:
+   - Buttons use direct verbs: `Review`, `View`, `Apply Patch`, `Dismiss`, `Snooze`, `Run Benchmarks`.

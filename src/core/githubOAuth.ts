@@ -13,7 +13,7 @@ export interface GitHubUserSession {
     htmlUrl: string;
   };
   connectedAt: string;
-  source: 'oauth' | 'dev_simulation';
+  source: 'oauth';
 }
 
 export interface GitHubRepoSummary {

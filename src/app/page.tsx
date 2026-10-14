@@ -7,24 +7,15 @@ import {
   CheckCircle,
   GitPullRequest,
   Clock,
-  ArrowRight,
   RefreshCw,
-  Zap,
-  Filter,
-  Terminal,
-  Activity,
-  ShieldAlert,
-  Server,
   Search,
   CheckCircle2,
-  ExternalLink,
   ChevronRight,
-  Cpu,
-  Layers,
-  Sparkles
+  ShieldAlert,
+  Server
 } from 'lucide-react';
 
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -57,6 +48,16 @@ interface DashboardMetrics {
   verifiedResolved: number;
   fixPassRate: number;
   meanTimeToResolveMinutes: number;
+}
+
+function timeAgo(dateString: string): string {
+  const diff = Date.now() - new Date(dateString).getTime();
+  const mins = Math.floor(diff / (1000 * 60));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 export default function DashboardPage() {
@@ -98,7 +99,7 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const triggerSimulation = async (type: 'sentry' | 'actions' | 'generic') => {
+  const triggerSimulation = async (type: 'sentry' | 'actions') => {
     setSimulating(type);
     try {
       await fetch(`/api/webhooks/${type === 'actions' ? 'github-actions' : type}`, {
@@ -129,8 +130,7 @@ export default function DashboardPage() {
                   ]
                 }
               }
-            : type === 'actions'
-            ? {
+            : {
                 workflow_run: {
                   id: Math.floor(1000 + Math.random() * 9000),
                   name: 'CI Test Suite',
@@ -140,14 +140,7 @@ export default function DashboardPage() {
                   display_title: 'feat: add customer metadata payload parsing in checkout'
                 },
                 repository: { full_name: 'nebiyu-org/checkout-api-service' },
-                logExcerpt: "FAIL src/controllers/__tests__/checkout.test.ts\nTypeError: Cannot read properties of undefined (reading 'billingDetails')\n  at handleCheckout (src/controllers/paymentController.ts:10:33)"
-              }
-            : {
-                title: 'High memory saturation in cache worker',
-                type: 'MemoryThresholdException',
-                file: 'src/sessionCache.ts',
-                line: 14,
-                environment: 'production'
+                logExcerpt: "FAIL src/controllers/__tests__/checkout.test.ts\nTypeError: Cannot read properties of undefined (reading 'billingDetails')"
               }
         )
       });
@@ -155,29 +148,27 @@ export default function DashboardPage() {
     } catch (e) {
       console.error('Simulation error:', e);
     } finally {
-      setTimeout(() => setSimulating(null), 800);
+      setTimeout(() => setSimulating(null), 600);
     }
   };
 
   const filteredIncidents = useMemo(() => {
     return incidents.filter(inc => {
-      // Filter by category
-      if (activeFilter === 'AWAITING' && inc.status !== 'awaiting_approval') return false;
+      if (activeFilter === 'REVIEW' && inc.status !== 'awaiting_approval') return false;
       if (activeFilter === 'FIXING' && inc.status !== 'fixing' && inc.status !== 'validating') return false;
       if (activeFilter === 'PR_OPEN' && inc.status !== 'pr_open') return false;
       if (activeFilter === 'RESOLVED' && inc.status !== 'verified_resolved') return false;
       if (activeFilter === 'ABSTAINED' && inc.status !== 'abstained') return false;
 
-      // Filter by search query
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
-        const matchesTitle = inc.title.toLowerCase().includes(query);
-        const matchesId = inc.id.toLowerCase().includes(query);
-        const matchesSource = inc.source.toLowerCase().includes(query);
-        const matchesCommit = inc.commitSha?.toLowerCase().includes(query);
-        return matchesTitle || matchesId || matchesSource || matchesCommit;
+        return (
+          inc.title.toLowerCase().includes(query) ||
+          inc.id.toLowerCase().includes(query) ||
+          inc.source.toLowerCase().includes(query) ||
+          inc.commitSha?.toLowerCase().includes(query)
+        );
       }
-
       return true;
     });
   }, [incidents, activeFilter, searchQuery]);
@@ -185,7 +176,7 @@ export default function DashboardPage() {
   const filterCounts = useMemo(() => {
     return {
       ALL: incidents.length,
-      AWAITING: incidents.filter(i => i.status === 'awaiting_approval').length,
+      REVIEW: incidents.filter(i => i.status === 'awaiting_approval').length,
       FIXING: incidents.filter(i => i.status === 'fixing' || i.status === 'validating').length,
       PR_OPEN: incidents.filter(i => i.status === 'pr_open').length,
       RESOLVED: incidents.filter(i => i.status === 'verified_resolved').length,
@@ -197,83 +188,76 @@ export default function DashboardPage() {
     switch (status) {
       case 'awaiting_approval':
         return (
-          <Badge variant="info" className="gap-1.5 font-medium">
-            <span className="size-1.5 rounded-full bg-blue-400 animate-pulse" />
-            Awaiting Review
-          </Badge>
+          <span className="inline-flex items-center gap-1.5 text-xs text-amber-400 font-medium">
+            <span className="size-1.5 rounded-full bg-amber-400" />
+            Needs Review
+          </span>
         );
       case 'fixing':
       case 'validating':
         return (
-          <Badge variant="warning" className="gap-1.5 font-medium">
-            <span className="size-1.5 rounded-full bg-amber-400 animate-pulse" />
-            Sandbox Fixing
-          </Badge>
+          <span className="inline-flex items-center gap-1.5 text-xs text-blue-400 font-medium">
+            <span className="size-1.5 rounded-full bg-blue-400 animate-pulse" />
+            Remediating
+          </span>
         );
       case 'pr_open':
         return (
-          <Badge variant="default" className="bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 gap-1.5 font-medium">
+          <span className="inline-flex items-center gap-1.5 text-xs text-sky-400 font-medium">
             <GitPullRequest className="size-3" />
-            Draft PR Open
-          </Badge>
+            Draft PR
+          </span>
         );
       case 'verified_resolved':
         return (
-          <Badge variant="success" className="gap-1.5 font-medium">
-            <CheckCircle2 className="size-3 text-emerald-400" />
-            Verified Resolved
-          </Badge>
+          <span className="inline-flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
+            <CheckCircle2 className="size-3" />
+            Resolved
+          </span>
         );
       case 'abstained':
         return (
-          <Badge variant="purple" className="gap-1.5 font-medium">
-            Abstained (Policy)
-          </Badge>
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
+            Abstained
+          </span>
         );
       default:
-        return <Badge variant="secondary">{status}</Badge>;
+        return <span className="text-xs text-muted-foreground">{status}</span>;
     }
   };
 
   const getSeverityBadge = (severity: string) => {
     switch (severity) {
       case 'critical':
-        return <Badge variant="destructive" className="uppercase text-[10px] tracking-wider font-bold">Critical</Badge>;
+        return <Badge variant="destructive" className="uppercase text-[10px] px-1.5 py-0 font-bold">Critical</Badge>;
       case 'high':
-        return <Badge variant="warning" className="uppercase text-[10px] tracking-wider font-bold">High</Badge>;
+        return <Badge variant="warning" className="uppercase text-[10px] px-1.5 py-0 font-bold">High</Badge>;
       default:
-        return <Badge variant="secondary" className="uppercase text-[10px] tracking-wider font-bold">{severity}</Badge>;
+        return <Badge variant="secondary" className="uppercase text-[10px] px-1.5 py-0 font-medium">{severity}</Badge>;
     }
   };
 
   return (
     <div className="space-y-6">
-      {/* Top Banner / Actions Block */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
-              Incident Operations Center
-            </h1>
-            <Badge variant="outline" className="border-emerald-500/30 text-emerald-400 text-[10px] font-mono">
-              Real-time Ingestion
-            </Badge>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Adversarial root cause falsification, mutation test validation in isolated Docker sandbox, and automated draft PRs.
+      {/* Top Header & Simulation Controls */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight text-foreground">Incidents</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Automated triage, root cause analysis, and draft PRs.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
             onClick={() => triggerSimulation('sentry')}
             disabled={Boolean(simulating)}
-            className="text-xs border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200"
+            className="h-8 text-xs gap-1.5 border-border/80 text-muted-foreground hover:text-foreground"
           >
-            <ShieldAlert className="size-3.5 mr-1.5 text-rose-400" />
-            {simulating === 'sentry' ? 'Ingesting...' : 'Simulate Sentry (500)'}
+            <ShieldAlert className="size-3.5 text-rose-400" />
+            <span>{simulating === 'sentry' ? 'Ingesting...' : 'Test Sentry'}</span>
           </Button>
 
           <Button
@@ -281,270 +265,171 @@ export default function DashboardPage() {
             size="sm"
             onClick={() => triggerSimulation('actions')}
             disabled={Boolean(simulating)}
-            className="text-xs border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 hover:text-amber-200"
+            className="h-8 text-xs gap-1.5 border-border/80 text-muted-foreground hover:text-foreground"
           >
-            <Server className="size-3.5 mr-1.5 text-amber-400" />
-            {simulating === 'actions' ? 'Triggering...' : 'Simulate CI Failure'}
+            <Server className="size-3.5 text-blue-400" />
+            <span>{simulating === 'actions' ? 'Triggering...' : 'Test CI'}</span>
           </Button>
 
           <Button
             variant="ghost"
             size="icon"
             onClick={fetchDashboardData}
-            title="Refresh incident telemetry"
+            title="Refresh"
             className="h-8 w-8 text-muted-foreground hover:text-foreground"
           >
-            <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`size-3.5 ${loading ? 'animate-spin' : ''}`} />
           </Button>
         </div>
       </div>
 
-      {/* KPI Stats Cards Block */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Detected */}
-        <Card className="hover:border-border transition-all">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Total Detected
-            </CardTitle>
-            <div className="p-1.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-400">
-              <AlertTriangle className="size-4" />
-            </div>
+      {/* KPI Stats Grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Card className="border-border/70 bg-card/60">
+          <CardHeader className="p-4 pb-1">
+            <CardTitle className="text-xs font-medium text-muted-foreground">Total Incidents</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold font-mono tracking-tight text-foreground">
-              {metrics.totalIncidents}
-            </div>
-            <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1">
-              <Layers className="size-3 text-primary" />
-              Cross-tool correlated telemetry
-            </p>
+          <CardContent className="p-4 pt-1">
+            <div className="text-2xl font-bold font-mono text-foreground">{metrics.totalIncidents}</div>
           </CardContent>
         </Card>
 
-        {/* Awaiting Review */}
-        <Card className="hover:border-border transition-all">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Awaiting Approval
-            </CardTitle>
-            <div className="p-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400">
-              <Clock className="size-4" />
-            </div>
+        <Card className="border-border/70 bg-card/60">
+          <CardHeader className="p-4 pb-1">
+            <CardTitle className="text-xs font-medium text-muted-foreground">Needs Review</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold font-mono tracking-tight text-blue-400">
-              {metrics.awaitingReview}
-            </div>
-            <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1">
-              <span className="size-1.5 rounded-full bg-blue-400" />
-              Human-in-the-loop review gate
-            </p>
+          <CardContent className="p-4 pt-1">
+            <div className="text-2xl font-bold font-mono text-amber-400">{metrics.awaitingReview}</div>
           </CardContent>
         </Card>
 
-        {/* Draft PRs Proven */}
-        <Card className="hover:border-border transition-all">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Draft PRs Proven
-            </CardTitle>
-            <div className="p-1.5 rounded-md bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
-              <GitPullRequest className="size-4" />
-            </div>
+        <Card className="border-border/70 bg-card/60">
+          <CardHeader className="p-4 pb-1">
+            <CardTitle className="text-xs font-medium text-muted-foreground">Draft PRs</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold font-mono tracking-tight text-cyan-400">
-              {metrics.prsOpen}
-            </div>
-            <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1">
-              <CheckCircle2 className="size-3 text-emerald-400" />
-              Mutation test verified in sandbox
-            </p>
+          <CardContent className="p-4 pt-1">
+            <div className="text-2xl font-bold font-mono text-foreground">{metrics.prsOpen}</div>
           </CardContent>
         </Card>
 
-        {/* Mean Time To Fix */}
-        <Card className="hover:border-border transition-all">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Mean Time to Fix
-            </CardTitle>
-            <div className="p-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-              <CheckCircle className="size-4" />
-            </div>
+        <Card className="border-border/70 bg-card/60">
+          <CardHeader className="p-4 pb-1">
+            <CardTitle className="text-xs font-medium text-muted-foreground">Avg Resolution</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold font-mono tracking-tight text-emerald-400">
-              {metrics.meanTimeToResolveMinutes}m
-            </div>
-            <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1">
-              <span className="text-emerald-400 font-medium font-mono">-99.8%</span>
-              <span>vs 18.4d industry avg</span>
-            </p>
+          <CardContent className="p-4 pt-1">
+            <div className="text-2xl font-bold font-mono text-emerald-400">{metrics.meanTimeToResolveMinutes}m</div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Incident Data Table Block */}
-      <Card className="border border-border/80">
-        <CardHeader className="p-4 sm:p-5 border-b border-border/60">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            {/* Search Input */}
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder="Search incidents, commit, source..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 h-9 text-xs bg-muted/40"
-              />
-            </div>
-
-            {/* Filter Pills */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
-              {[
-                { key: 'ALL', label: 'All Incidents' },
-                { key: 'AWAITING', label: 'Awaiting Review' },
-                { key: 'FIXING', label: 'Sandbox Fixing' },
-                { key: 'PR_OPEN', label: 'Draft PR Open' },
-                { key: 'RESOLVED', label: 'Resolved' },
-                { key: 'ABSTAINED', label: 'Abstained' },
-              ].map((f) => {
-                const count = filterCounts[f.key as keyof typeof filterCounts] || 0;
-                const isSelected = activeFilter === f.key;
-                return (
-                  <Button
-                    key={f.key}
-                    variant={isSelected ? "default" : "ghost"}
-                    size="sm"
-                    onClick={() => setActiveFilter(f.key)}
-                    className={`h-8 text-xs font-medium rounded-lg px-2.5 ${
-                      isSelected
-                        ? "bg-primary text-primary-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
-                    }`}
-                  >
-                    <span>{f.label}</span>
-                    <span className={`ml-1.5 rounded-full px-1.5 py-0.2 text-[10px] font-mono ${
-                      isSelected ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground"
-                    }`}>
-                      {count}
-                    </span>
-                  </Button>
-                );
-              })}
-            </div>
+      {/* Incident List Table */}
+      <Card className="border-border/70 bg-card/60">
+        <div className="p-3 sm:p-4 border-b border-border/60 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="relative flex-1 max-w-xs">
+            <Search className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
+            <Input
+              type="text"
+              placeholder="Filter incidents..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-8 h-8 text-xs bg-muted/20 border-border/60"
+            />
           </div>
-        </CardHeader>
+
+          <div className="flex items-center gap-1 overflow-x-auto">
+            {[
+              { key: 'ALL', label: 'All', count: filterCounts.ALL },
+              { key: 'REVIEW', label: 'Needs Review', count: filterCounts.REVIEW },
+              { key: 'PR_OPEN', label: 'Draft PRs', count: filterCounts.PR_OPEN },
+              { key: 'RESOLVED', label: 'Resolved', count: filterCounts.RESOLVED },
+              { key: 'ABSTAINED', label: 'Abstained', count: filterCounts.ABSTAINED },
+            ].map((f) => {
+              const isSelected = activeFilter === f.key;
+              return (
+                <button
+                  key={f.key}
+                  onClick={() => setActiveFilter(f.key)}
+                  className={`h-7 px-2.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                    isSelected
+                      ? 'bg-secondary text-foreground font-semibold shadow-sm border border-border/80'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                  }`}
+                >
+                  <span>{f.label}</span>
+                  <span className="text-[10px] font-mono text-muted-foreground">({f.count})</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         <CardContent className="p-0">
           {loading ? (
-            <div className="py-20 text-center font-mono text-xs text-muted-foreground">
-              Ingesting real-time incident feed...
+            <div className="py-16 text-center text-xs text-muted-foreground font-mono">
+              Loading incidents...
             </div>
           ) : filteredIncidents.length === 0 ? (
-            <div className="py-16 text-center space-y-3">
-              <div className="mx-auto size-12 rounded-full bg-muted/50 border border-border flex items-center justify-center text-muted-foreground">
-                <Filter className="size-5" />
-              </div>
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-foreground">No incidents match your filter</p>
-                <p className="text-xs text-muted-foreground">
-                  Try clearing the search query or trigger a live simulation using the buttons above.
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => { setActiveFilter('ALL'); setSearchQuery(''); }}
-                className="text-xs"
-              >
-                Reset Filters
-              </Button>
+            <div className="py-14 text-center space-y-1">
+              <p className="text-xs font-medium text-foreground">No incidents found</p>
+              <p className="text-[11px] text-muted-foreground">Adjust filters or trigger a test signal above.</p>
             </div>
           ) : (
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[110px]">Incident ID</TableHead>
-                  <TableHead className="min-w-[280px]">Summary & Root Cause</TableHead>
-                  <TableHead className="w-[140px]">Source & Telemetry</TableHead>
-                  <TableHead className="w-[140px]">Environment / Ref</TableHead>
-                  <TableHead className="w-[150px]">Current State</TableHead>
-                  <TableHead className="w-[120px] text-right">Actions</TableHead>
+                <TableRow className="border-border/60 hover:bg-transparent">
+                  <TableHead className="w-[100px]">ID</TableHead>
+                  <TableHead className="min-w-[280px]">Summary</TableHead>
+                  <TableHead className="w-[120px]">Source</TableHead>
+                  <TableHead className="w-[140px]">Environment</TableHead>
+                  <TableHead className="w-[140px]">Status</TableHead>
+                  <TableHead className="w-[90px] text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredIncidents.map((inc) => (
-                  <TableRow key={inc.id} className="group hover:bg-muted/30">
-                    {/* ID & Severity */}
-                    <TableCell className="font-mono text-xs font-semibold">
-                      <div className="space-y-1">
-                        <span className="text-foreground">{inc.id}</span>
-                        <div>{getSeverityBadge(inc.severity)}</div>
+                  <TableRow key={inc.id} className="group border-border/50 hover:bg-muted/20">
+                    <TableCell className="font-mono text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold text-foreground">{inc.id}</span>
+                        {getSeverityBadge(inc.severity)}
                       </div>
                     </TableCell>
 
-                    {/* Summary */}
                     <TableCell>
-                      <div className="space-y-1">
-                        <Link
-                          href={`/incidents/${inc.id}`}
-                          className="font-semibold text-sm text-foreground hover:text-primary transition-colors flex items-center gap-1.5"
-                        >
-                          <span className="line-clamp-1">{inc.title}</span>
-                          <ArrowRight className="size-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-primary shrink-0" />
-                        </Link>
-                        {inc.fingerprint && (
-                          <p className="text-[11px] font-mono text-muted-foreground truncate max-w-md">
-                            fp: {inc.fingerprint.slice(0, 24)}...
-                          </p>
-                        )}
+                      <Link
+                        href={`/incidents/${inc.id}`}
+                        className="font-medium text-xs text-foreground hover:text-primary transition-colors line-clamp-1 block"
+                      >
+                        {inc.title}
+                      </Link>
+                    </TableCell>
+
+                    <TableCell className="text-xs text-muted-foreground font-mono">
+                      <span>{inc.source}</span>
+                      {inc.occurrences > 1 && (
+                        <span className="ml-1 text-[10px] text-muted-foreground/70 font-sans">
+                          ({inc.occurrences}x)
+                        </span>
+                      )}
+                    </TableCell>
+
+                    <TableCell className="text-xs text-muted-foreground">
+                      <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                        <span>{inc.environment || 'production'}</span>
+                        <span className="text-muted-foreground/40">•</span>
+                        <span>{timeAgo(inc.detectedAt)}</span>
                       </div>
                     </TableCell>
 
-                    {/* Source & Correlated Count */}
-                    <TableCell>
-                      <div className="flex flex-col gap-1 text-xs">
-                        <Badge variant="outline" className="font-mono text-[10px] w-fit border-border bg-muted/40">
-                          {inc.source}
-                        </Badge>
-                        {inc.occurrences > 1 && (
-                          <span className="text-[10px] font-mono text-primary font-semibold">
-                            {inc.occurrences}x correlated
-                          </span>
-                        )}
-                      </div>
-                    </TableCell>
-
-                    {/* Environment & Commit */}
-                    <TableCell>
-                      <div className="space-y-0.5 text-xs font-mono">
-                        <div className="text-muted-foreground">
-                          Commit: <span className="text-foreground">{inc.commitSha ? inc.commitSha.slice(0, 7) : 'HEAD'}</span>
-                        </div>
-                        <div className="text-[11px] text-muted-foreground">
-                          {inc.environment || 'production'}
-                        </div>
-                        <div className="text-[10px] text-muted-foreground/70">
-                          {new Date(inc.detectedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                        </div>
-                      </div>
-                    </TableCell>
-
-                    {/* Status Badge */}
                     <TableCell>
                       {getStatusBadge(inc.status)}
                     </TableCell>
 
-                    {/* Action Button */}
                     <TableCell className="text-right">
-                      <Button asChild size="sm" variant={inc.status === 'awaiting_approval' ? "default" : "outline"} className="h-8 text-xs font-medium">
+                      <Button asChild size="sm" variant={inc.status === 'awaiting_approval' ? "default" : "ghost"} className="h-7 px-2.5 text-xs">
                         <Link href={`/incidents/${inc.id}`}>
-                          <span>{inc.status === 'awaiting_approval' ? 'Review & Fix' : 'Inspect'}</span>
-                          <ChevronRight className="size-3.5 ml-1" />
+                          <span>{inc.status === 'awaiting_approval' ? 'Review' : 'View'}</span>
+                          <ChevronRight className="size-3 ml-0.5" />
                         </Link>
                       </Button>
                     </TableCell>
@@ -554,11 +439,6 @@ export default function DashboardPage() {
             </Table>
           )}
         </CardContent>
-
-        <CardFooter className="p-3 sm:p-4 border-t border-border/60 flex items-center justify-between text-xs text-muted-foreground">
-          <span>Showing {filteredIncidents.length} of {incidents.length} recorded incidents</span>
-          <span className="font-mono text-[11px]">Auto-refresh: 3s active</span>
-        </CardFooter>
       </Card>
     </div>
   );
