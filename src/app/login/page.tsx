@@ -37,6 +37,8 @@ function LoginContent() {
 
   const getErrorMessage = (err: string | null) => {
     switch (err) {
+      case 'oauth_not_configured':
+        return 'Google OAuth credentials are not configured in .env. Please use On-Call Operator Access below.';
       case 'access_denied':
         return 'Access denied. Please approve Google permissions to continue.';
       case 'invalid_state':
