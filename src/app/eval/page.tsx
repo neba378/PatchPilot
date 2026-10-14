@@ -48,8 +48,10 @@ export default function EvaluationPage() {
   const runBenchmark = async () => {
     setRunning(true);
     try {
-      await new Promise((r) => setTimeout(r, 800));
+      await fetch('/api/eval/run', { method: 'POST' });
       await fetchLatestEval();
+    } catch (e) {
+      console.error('Benchmark execution error:', e);
     } finally {
       setRunning(false);
     }

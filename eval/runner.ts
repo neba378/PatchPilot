@@ -17,7 +17,7 @@ interface EvalCase {
   noiseSettings?: any;
 }
 
-async function runEvaluation() {
+export async function runEvaluation(): Promise<any> {
   const casesPath = path.join(process.cwd(), 'eval', 'cases.json');
   const cases: EvalCase[] = JSON.parse(fs.readFileSync(casesPath, 'utf-8'));
 
@@ -159,6 +159,10 @@ async function runEvaluation() {
       resultsJson: JSON.stringify(resultPayload)
     });
   } catch {}
+
+  return resultPayload;
 }
 
-runEvaluation();
+if (process.argv[1]?.endsWith('runner.ts')) {
+  runEvaluation();
+}

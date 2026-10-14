@@ -39,3 +39,14 @@ evalRouter.get('/latest', async (_req: Request, res: Response) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
+evalRouter.post('/run', async (_req: Request, res: Response) => {
+  try {
+    const { runEvaluation } = await import(path.join(process.cwd(), 'eval', 'runner.ts'));
+    const result = await runEvaluation();
+    return res.json({ success: true, result });
+  } catch (err: any) {
+    logger.error({ error: err.message }, '[Eval] Benchmark run failed');
+    return res.status(500).json({ error: err.message });
+  }
+});
