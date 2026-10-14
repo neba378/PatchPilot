@@ -18,8 +18,8 @@ export const config = {
 export async function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
-  // 1. Allow public authentication endpoints and login page
-  if (pathname.startsWith('/api/auth') || pathname === '/login') {
+  // 1. Allow public authentication endpoints, login page, and setup wizard
+  if (pathname.startsWith('/api/auth') || pathname === '/login' || pathname === '/wizard') {
     // If user is already authenticated and visits /login, redirect to dashboard
     if (pathname === '/login') {
       const sessionCookie = request.cookies.get(GOOGLE_SESSION_COOKIE_NAME)?.value;

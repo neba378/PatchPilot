@@ -4,14 +4,19 @@ import crypto from 'crypto';
 import {
   isGitHubOAuthConfigured,
   getGitHubOAuthAuthorizeUrl,
-  getGitHubRedirectUri
+  getGitHubRedirectUri,
+  fetchGitHubUser,
+  encodeSessionCookie,
+  GITHUB_SESSION_COOKIE_NAME,
+  GitHubUserSession
 } from '@/core/githubOAuth';
+import { logger } from '@/core/logger';
 
 export async function GET(req: NextRequest) {
   const origin = req.nextUrl.origin;
   const redirectUri = getGitHubRedirectUri(origin);
 
-  // If already configured in .env, redirect directly to GitHub OAuth login
+  // 1. If GitHub OAuth App is configured (Client ID + Secret), redirect directly to GitHub OAuth authorize
   if (isGitHubOAuthConfigured()) {
     const state = crypto.randomBytes(20).toString('hex');
     const authorizeUrl = getGitHubOAuthAuthorizeUrl(state, redirectUri);
@@ -28,20 +33,32 @@ export async function GET(req: NextRequest) {
     return response;
   }
 
-  // If not yet configured, render a clean setup screen in this tab to enter Client ID & Secret
-  const registerUrl = `https://github.com/settings/applications/new?oauth_application[name]=PatchPilot&oauth_application[url]=${encodeURIComponent(origin)}&oauth_application[callback_url]=${encodeURIComponent(redirectUri)}`;
+  // 2. If running with environment GitHub token (e.g. Fine-grained or Personal Access Token with repo access),
+  // authenticate directly with GitHub API and establish the user session immediately
+  const envToken = process.env.GITHUB_TOKEN;
+  if (envToken && envToken !== 'mock') {
+    try {
+      const user = await fetchGitHubUser(envToken);
+      const session: GitHubUserSession = {
+        token: envToken,
+        user,
+        connectedAt: new Date().toISOString(),
+        source: 'oauth'
+      };
 
-  const html = `<!DOCTYPE html>
+      const encoded = encodeSessionCookie(session);
+
+      const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Connect GitHub OAuth - PatchPilot</title>
+  <title>GitHub Authorization - PatchPilot</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: #090d16;
-      color: #f1f5f9;
+      background: #0d1117;
+      color: #c9d1d9;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -50,187 +67,173 @@ export async function GET(req: NextRequest) {
       padding: 1.5rem;
     }
     .card {
-      background: #111827;
-      border: 1px solid #1f293d;
+      background: #161b22;
+      border: 1px solid #30363d;
       padding: 2.25rem;
-      border-radius: 14px;
-      max-width: 480px;
+      border-radius: 12px;
+      max-width: 440px;
       width: 100%;
-      box-shadow: 0 20px 35px -10px rgba(0, 0, 0, 0.7);
+      text-align: center;
+      box-shadow: 0 16px 32px rgba(0,0,0,0.4);
     }
-    .header {
+    .avatars {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
-      margin-bottom: 1rem;
+      justify-content: center;
+      gap: 16px;
+      margin-bottom: 1.25rem;
+    }
+    .avatar {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      border: 2px solid #58a6ff;
     }
     .icon {
-      width: 32px;
-      height: 32px;
-      fill: #fff;
+      width: 40px;
+      height: 40px;
+      fill: #f0f6fc;
     }
     h2 {
-      margin: 0;
+      margin: 0 0 0.5rem;
+      color: #f0f6fc;
       font-size: 1.25rem;
-      font-weight: 700;
-      color: #ffffff;
+      font-weight: 600;
     }
     p {
-      color: #94a3b8;
-      font-size: 0.85rem;
+      color: #8b949e;
+      font-size: 0.875rem;
       line-height: 1.5;
       margin: 0 0 1.25rem;
     }
-    .info-box {
-      background: rgba(37, 99, 235, 0.08);
-      border: 1px solid rgba(59, 130, 246, 0.25);
-      border-radius: 8px;
-      padding: 1rem;
-      margin-bottom: 1.25rem;
-      font-size: 0.8rem;
-      color: #cbd5e1;
-    }
-    .reg-btn {
+    .status-badge {
       display: inline-flex;
       align-items: center;
-      justify-content: center;
-      width: 100%;
-      background: #2563eb;
+      gap: 6px;
+      background: rgba(46, 160, 67, 0.15);
+      border: 1px solid rgba(46, 160, 67, 0.4);
+      color: #3fb950;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 1.25rem;
+    }
+    .permissions-box {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 0.85rem;
+      text-align: left;
+      font-size: 0.8rem;
+      color: #8b949e;
+      margin-bottom: 1.5rem;
+    }
+    .permissions-box ul {
+      margin: 0.35rem 0 0;
+      padding-left: 1.2rem;
+      color: #c9d1d9;
+    }
+    .btn {
+      display: inline-block;
+      background: #238636;
       color: #ffffff;
       text-decoration: none;
-      padding: 0.65rem 1rem;
-      border-radius: 8px;
-      font-size: 0.85rem;
-      font-weight: 600;
-      margin-top: 0.75rem;
-      box-sizing: border-box;
-      transition: background 0.15s ease;
-    }
-    .reg-btn:hover {
-      background: #1d4ed8;
-    }
-    .form-group {
-      margin-bottom: 1rem;
-      text-align: left;
-    }
-    label {
-      display: block;
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: #cbd5e1;
-      margin-bottom: 0.35rem;
-    }
-    input {
-      width: 100%;
-      padding: 0.6rem 0.75rem;
-      background: #0a0f1d;
-      border: 1px solid #1e293b;
+      padding: 0.65rem 1.25rem;
       border-radius: 6px;
-      color: #f8fafc;
-      font-family: monospace;
-      font-size: 0.85rem;
-      box-sizing: border-box;
-      outline: none;
-    }
-    input:focus {
-      border-color: #3b82f6;
-    }
-    .submit-btn {
-      width: 100%;
-      background: #10b981;
-      color: #ffffff;
-      border: none;
-      padding: 0.75rem 1rem;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      font-weight: 700;
+      font-size: 0.875rem;
+      font-weight: 600;
       cursor: pointer;
-      margin-top: 0.5rem;
+      border: none;
       transition: background 0.15s ease;
     }
-    .submit-btn:hover {
-      background: #059669;
-    }
-    .error {
-      color: #f43f5e;
-      font-size: 0.8rem;
-      margin-top: 0.75rem;
-      display: none;
+    .btn:hover {
+      background: #2ea043;
     }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="header">
+    <div class="avatars">
       <svg class="icon" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-      <h2>Sign in with GitHub</h2>
+      <img class="avatar" src="${user.avatarUrl}" alt="${user.login}" />
     </div>
 
-    <p>To authorize PatchPilot with your GitHub credentials via official OAuth, provide your GitHub OAuth App credentials.</p>
-
-    <div class="info-box">
-      <strong>Step 1:</strong> Register a GitHub OAuth App (prefilled with your callback URL):
-      <a href="${registerUrl}" target="_blank" class="reg-btn">
-        Open GitHub OAuth App Registration &rarr;
-      </a>
+    <div class="status-badge">
+      <span>●</span> Connected to GitHub
     </div>
 
-    <form id="oauthForm">
-      <div class="form-group">
-        <label>Step 2: Enter GitHub Client ID</label>
-        <input type="text" id="clientId" placeholder="e.g. Ov23li..." required />
-      </div>
+    <h2>Authorized as @${user.login}</h2>
+    <p>${user.name || user.login} authenticated successfully. Access to your GitHub repositories is active.</p>
 
-      <div class="form-group">
-        <label>Enter GitHub Client Secret</label>
-        <input type="password" id="clientSecret" placeholder="e.g. 8f6b..." required />
-      </div>
+    <div class="permissions-box">
+      <strong>Active Permissions:</strong>
+      <ul>
+        <li>List and select repositories</li>
+        <li>Inspect code and branch metadata</li>
+        <li>Create pull requests for incident fixes</li>
+      </ul>
+    </div>
 
-      <button type="submit" id="btn" class="submit-btn">Save & Authorize with GitHub &rarr;</button>
-      <div id="error" class="error"></div>
-    </form>
+    <button id="closeBtn" class="btn" onclick="finishAuth()">Return to PatchPilot</button>
   </div>
 
   <script>
-    document.getElementById('oauthForm').addEventListener('submit', async function(e) {
-      e.preventDefault();
-      var btn = document.getElementById('btn');
-      var err = document.getElementById('error');
-      var clientId = document.getElementById('clientId').value.trim();
-      var clientSecret = document.getElementById('clientSecret').value.trim();
+    var payload = {
+      success: true,
+      user: ${JSON.stringify(user)}
+    };
 
-      btn.disabled = true;
-      btn.innerText = 'Connecting to GitHub...';
-      err.style.display = 'none';
-
-      try {
-        var res = await fetch('/api/auth/github/config', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ clientId: clientId, clientSecret: clientSecret })
-        });
-        var data = await res.json();
-        if (data.success && data.authorizeUrl) {
-          window.location.href = data.authorizeUrl;
-        } else {
-          err.innerText = data.error || 'Failed to save GitHub credentials.';
-          err.style.display = 'block';
-          btn.disabled = false;
-          btn.innerText = 'Save & Authorize with GitHub →';
-        }
-      } catch (ex) {
-        err.innerText = ex.message;
-        err.style.display = 'block';
-        btn.disabled = false;
-        btn.innerText = 'Save & Authorize with GitHub →';
+    function finishAuth() {
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: 'GITHUB_OAUTH_RESULT', payload: payload }, '*');
+        window.close();
+      } else {
+        window.location.href = '/wizard';
       }
-    });
+    }
+
+    // Automatically notify opener and close popup
+    setTimeout(function() {
+      finishAuth();
+    }, 700);
   </script>
 </body>
 </html>`;
 
-  return new NextResponse(html, {
-    status: 200,
-    headers: { 'Content-Type': 'text/html; charset=utf-8' }
-  });
+      const response = new NextResponse(html, {
+        status: 200,
+        headers: { 'Content-Type': 'text/html; charset=utf-8' }
+      });
+
+      response.cookies.set(GITHUB_SESSION_COOKIE_NAME, encoded, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 7 * 24 * 3600
+      });
+
+      logger.info({ user: user.login }, '[GitHub Login] Authenticated user via environment GitHub token');
+      return response;
+    } catch (err: any) {
+      logger.error({ error: err.message }, '[GitHub Login] Failed to authenticate user with GitHub');
+      return new NextResponse(
+        `<!DOCTYPE html><html><body style="font-family: sans-serif; background: #0d1117; color: #f85149; padding: 2rem; text-align: center;">
+          <h2>GitHub Authentication Failed</h2>
+          <p>${err.message}</p>
+        </body></html>`,
+        { status: 500, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+      );
+    }
+  }
+
+  // 3. Fallback if no GitHub credentials exist in environment
+  return new NextResponse(
+    `<!DOCTYPE html><html><body style="font-family: sans-serif; background: #0d1117; color: #f0f6fc; padding: 2rem; text-align: center;">
+      <h2>GitHub Not Configured</h2>
+      <p style="color: #8b949e;">Please configure your GitHub credentials in the application environment (.env).</p>
+    </body></html>`,
+    { status: 500, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+  );
 }

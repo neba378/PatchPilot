@@ -299,6 +299,17 @@ export default function SetupWizardPage() {
                         Connected
                       </Badge>
                     </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <a
+                        href="https://github.com/settings/tokens"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] text-muted-foreground hover:text-foreground hover:underline flex items-center gap-1"
+                      >
+                        Manage repository permissions on GitHub
+                        <ExternalLink className="size-2.5" />
+                      </a>
+                    </div>
                   </div>
                 </div>
 

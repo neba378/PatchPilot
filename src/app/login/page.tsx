@@ -95,11 +95,18 @@ function LoginContent() {
 
           <a
             href={loginUrl}
-            className="w-full flex items-center justify-center py-3.5 px-4 rounded-xl font-medium text-sm text-slate-100 bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-slate-600 shadow-md hover:shadow-lg transition-all group"
+            className="w-full flex items-center justify-center py-3.5 px-4 rounded-xl font-medium text-sm text-slate-100 bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-slate-600 shadow-md hover:shadow-lg transition-all group mb-3"
           >
             <GoogleIcon />
             <span>Continue with Google</span>
             <ArrowRight className="w-4 h-4 ml-auto text-slate-400 group-hover:text-white group-hover:translate-x-0.5 transition-all" />
+          </a>
+
+          <a
+            href={`/api/auth/dev-login?returnUrl=${encodeURIComponent(returnUrl)}`}
+            className="w-full flex items-center justify-center py-2.5 px-4 rounded-xl font-medium text-xs text-slate-300 hover:text-white bg-slate-900 hover:bg-slate-800/80 border border-slate-800 hover:border-slate-700 transition-all text-center"
+          >
+            <span>Continue as On-Call Operator (Demo Access)</span>
           </a>
 
           {/* Security Features */}
