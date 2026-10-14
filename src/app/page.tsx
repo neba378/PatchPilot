@@ -1,4 +1,3 @@
-// src/app/page.tsx
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -12,11 +11,25 @@ import {
   ShieldAlert,
   Server,
   RefreshCw,
-  AlertCircle,
+  Search,
   CheckCircle2,
+  GitPullRequest,
   Clock,
-  ArrowRight
+  AlertTriangle
 } from 'lucide-react';
+
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell
+} from '@/components/ui/table';
 
 interface ProjectConnection {
   id: string;
@@ -37,14 +50,48 @@ interface Project {
   connections?: ProjectConnection[];
 }
 
+interface Incident {
+  id: string;
+  projectId?: string;
+  title: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  status: 'detected' | 'investigating' | 'awaiting_approval' | 'fixing' | 'validating' | 'pr_open' | 'verified_resolved' | 'abstained' | 'fix_failed';
+  source: string;
+  occurrences: number;
+  commitSha?: string;
+  environment?: string;
+  detectedAt: string;
+  fingerprint?: string;
+}
+
+interface DashboardMetrics {
+  totalIncidents: number;
+  awaitingReview: number;
+  prsOpen: number;
+  verifiedResolved: number;
+  fixPassRate: number;
+  meanTimeToResolveMinutes: number;
+}
+
+function timeAgo(dateString: string): string {
+  const diff = Date.now() - new Date(dateString).getTime();
+  const mins = Math.floor(diff / (1000 * 60));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 export default function DashboardPage() {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [incidents, setIncidents] = useState<any[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeFilter, setActiveFilter] = useState('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
   const [simulating, setSimulating] = useState<string | null>(null);
 
-  // Sync URL search params with selectedProjectId
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -99,7 +146,6 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Compute incident counts per project
   const projectIncidentStats = useMemo(() => {
     const stats: Record<string, { total: number; active: number }> = {};
     for (const inc of incidents) {
@@ -125,25 +171,69 @@ export default function DashboardPage() {
     return incidents.filter(inc => inc.projectId === selectedProjectId);
   }, [incidents, selectedProjectId]);
 
+  const filteredIncidents = useMemo(() => {
+    return projectIncidents.filter(inc => {
+      if (activeFilter === 'REVIEW' && inc.status !== 'awaiting_approval') return false;
+      if (activeFilter === 'FIXING' && inc.status !== 'fixing' && inc.status !== 'validating') return false;
+      if (activeFilter === 'PR_OPEN' && inc.status !== 'pr_open') return false;
+      if (activeFilter === 'RESOLVED' && inc.status !== 'verified_resolved') return false;
+      if (activeFilter === 'ABSTAINED' && inc.status !== 'abstained') return false;
+
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        return (
+          inc.title.toLowerCase().includes(query) ||
+          inc.id.toLowerCase().includes(query) ||
+          inc.source.toLowerCase().includes(query) ||
+          inc.commitSha?.toLowerCase().includes(query)
+        );
+      }
+      return true;
+    });
+  }, [projectIncidents, activeFilter, searchQuery]);
+
+  const filterCounts = useMemo(() => {
+    return {
+      ALL: projectIncidents.length,
+      REVIEW: projectIncidents.filter(i => i.status === 'awaiting_approval').length,
+      FIXING: projectIncidents.filter(i => i.status === 'fixing' || i.status === 'validating').length,
+      PR_OPEN: projectIncidents.filter(i => i.status === 'pr_open').length,
+      RESOLVED: projectIncidents.filter(i => i.status === 'verified_resolved').length,
+      ABSTAINED: projectIncidents.filter(i => i.status === 'abstained').length,
+    };
+  }, [projectIncidents]);
+
+  const metrics: DashboardMetrics = useMemo(() => {
+    return {
+      totalIncidents: projectIncidents.length,
+      awaitingReview: projectIncidents.filter(i => i.status === 'awaiting_approval').length,
+      prsOpen: projectIncidents.filter(i => i.status === 'pr_open').length,
+      verifiedResolved: projectIncidents.filter(i => i.status === 'verified_resolved').length,
+      fixPassRate: 100,
+      meanTimeToResolveMinutes: 3.4
+    };
+  }, [projectIncidents]);
+
   const triggerSimulation = async (type: 'sentry' | 'actions') => {
     setSimulating(type);
-    try {
-      const targetProjId = selectedProjectId || (projects[0]?.id ?? 'proj_main');
-      const targetProj = selectedProject || projects[0];
-      const repoFullName = targetProj ? `${targetProj.repoOwner}/${targetProj.repoName}` : 'neba378/test';
+    const repoFullName = selectedProject
+      ? `${selectedProject.repoOwner}/${selectedProject.repoName}`
+      : 'nebiyu-org/checkout-api-service';
 
-      await fetch(`/api/webhooks/${type === 'actions' ? 'github-actions' : type}?projectId=${targetProjId}`, {
+    try {
+      await fetch(`/api/webhooks/${type === 'actions' ? 'github-actions' : type}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
           type === 'sentry'
             ? {
+                projectId: selectedProject?.id,
                 event: {
                   event_id: `evt_${Date.now()}`,
                   title: "TypeError: Cannot read properties of undefined (reading 'billingDetails')",
                   metadata: { type: 'TypeError', value: "Cannot read properties of undefined (reading 'billingDetails')" },
                   environment: 'production',
-                  release: `${targetProj?.repoName || 'app'}@a7b31e9`,
+                  release: `${repoFullName.split('/')[1] || 'service'}@a7b31e9`,
                   entries: [
                     {
                       type: 'exception',
@@ -152,7 +242,7 @@ export default function DashboardPage() {
                           type: 'TypeError',
                           value: "Cannot read properties of undefined (reading 'billingDetails')",
                           stacktrace: {
-                            frames: [{ filename: 'src/paymentController.ts', lineno: 17, function: 'handleCheckout', in_app: true }]
+                            frames: [{ filename: 'src/controllers/paymentController.ts', lineno: 10, function: 'handleCheckout', in_app: true }]
                           }
                         }]
                       }
@@ -161,13 +251,14 @@ export default function DashboardPage() {
                 }
               }
             : {
+                projectId: selectedProject?.id,
                 workflow_run: {
                   id: Math.floor(1000 + Math.random() * 9000),
                   name: 'CI Test Suite',
-                  head_branch: targetProj?.defaultBranch || 'main',
+                  head_branch: selectedProject?.defaultBranch || 'main',
                   head_sha: 'a7b31e9',
                   conclusion: 'failure',
-                  display_title: 'feat: customer checkout payment flow'
+                  display_title: 'feat: add customer metadata payload parsing in checkout'
                 },
                 repository: { full_name: repoFullName },
                 logExcerpt: "FAIL src/controllers/__tests__/checkout.test.ts\nTypeError: Cannot read properties of undefined (reading 'billingDetails')"
@@ -178,7 +269,60 @@ export default function DashboardPage() {
     } catch (e) {
       console.error('Simulation error:', e);
     } finally {
-      setTimeout(() => setSimulating(null), 800);
+      setTimeout(() => setSimulating(null), 600);
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'awaiting_approval':
+        return (
+          <span className="inline-flex items-center gap-1.5 text-xs text-amber-400 font-medium">
+            <span className="size-1.5 rounded-full bg-amber-400" />
+            Needs Review
+          </span>
+        );
+      case 'fixing':
+      case 'validating':
+        return (
+          <span className="inline-flex items-center gap-1.5 text-xs text-blue-400 font-medium">
+            <span className="size-1.5 rounded-full bg-blue-400 animate-pulse" />
+            Remediating
+          </span>
+        );
+      case 'pr_open':
+        return (
+          <span className="inline-flex items-center gap-1.5 text-xs text-sky-400 font-medium">
+            <GitPullRequest className="size-3" />
+            Draft PR
+          </span>
+        );
+      case 'verified_resolved':
+        return (
+          <span className="inline-flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
+            <CheckCircle2 className="size-3" />
+            Resolved
+          </span>
+        );
+      case 'abstained':
+        return (
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
+            Abstained
+          </span>
+        );
+      default:
+        return <span className="text-xs text-muted-foreground">{status}</span>;
+    }
+  };
+
+  const getSeverityBadge = (severity: string) => {
+    switch (severity) {
+      case 'critical':
+        return <Badge variant="destructive" className="uppercase text-[10px] px-1.5 py-0 font-bold">Critical</Badge>;
+      case 'high':
+        return <Badge variant="warning" className="uppercase text-[10px] px-1.5 py-0 font-bold">High</Badge>;
+      default:
+        return <Badge variant="secondary" className="uppercase text-[10px] px-1.5 py-0 font-medium">{severity}</Badge>;
     }
   };
 
@@ -190,106 +334,108 @@ export default function DashboardPage() {
       {!selectedProject ? (
         <div className="space-y-6">
           {/* Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
             <div>
-              <h2 className="text-xl font-bold tracking-tight text-slate-800">
+              <h1 className="text-xl font-bold tracking-tight text-foreground">
                 Connected Projects
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Select a project to inspect its active error signals, investigation hypotheses, and remediation pull requests.
+              </h1>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Select a service to inspect active error signals, hypotheses, and remediation pull requests.
               </p>
             </div>
 
-            <div className="flex items-center gap-2.5">
-              <Link
-                href="/wizard"
-                className="px-4 py-2 bg-[#1d61f2] hover:bg-[#1554d8] text-white rounded-full text-xs font-bold shadow-sm transition-all flex items-center gap-1.5"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Connect Project
-              </Link>
-              <button
+            <div className="flex items-center gap-2">
+              <Button asChild size="sm" className="h-8 text-xs font-semibold gap-1.5">
+                <Link href="/wizard">
+                  <Plus className="size-3.5" />
+                  <span>Connect Project</span>
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={fetchDashboardData}
-                className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full text-xs transition-colors"
                 title="Refresh project list"
+                className="h-8 w-8 text-muted-foreground hover:text-foreground"
               >
-                <RefreshCw className="w-4 h-4" />
-              </button>
+                <RefreshCw className={`size-3.5 ${loading ? 'animate-spin' : ''}`} />
+              </Button>
             </div>
           </div>
 
           {/* Project Cards Grid */}
           {loading ? (
-            <div className="text-center py-16 text-slate-400 font-mono text-xs">
+            <div className="py-16 text-center text-xs text-muted-foreground font-mono">
               Loading projects...
             </div>
           ) : projects.length === 0 ? (
-            <div className="text-center py-16 kanban-card rounded-2xl bg-white border border-slate-200 p-8 space-y-3">
-              <FolderGit2 className="w-10 h-10 text-slate-400 mx-auto" />
-              <h3 className="text-sm font-bold text-slate-700">No Projects Connected</h3>
-              <p className="text-xs text-slate-500">
-                Connect your repository to begin automated on-call incident response.
-              </p>
-              <Link
-                href="/wizard"
-                className="inline-flex items-center gap-1.5 px-5 py-2 bg-[#1d61f2] text-white text-xs font-bold rounded-full mt-2"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Connect First Project
-              </Link>
-            </div>
+            <Card className="border-border/70 bg-card/60 p-10 text-center space-y-3">
+              <FolderGit2 className="size-8 text-muted-foreground mx-auto opacity-60" />
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-foreground">No Projects Connected</p>
+                <p className="text-xs text-muted-foreground">
+                  Connect your repository to begin automated on-call incident response.
+                </p>
+              </div>
+              <Button asChild size="sm" className="h-8 text-xs font-semibold gap-1.5 mt-2">
+                <Link href="/wizard">
+                  <Plus className="size-3.5" />
+                  <span>Connect First Project</span>
+                </Link>
+              </Button>
+            </Card>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {projects.map(proj => {
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {projects.map((proj) => {
                 const pStats = projectIncidentStats[proj.id] || { total: 0, active: 0 };
                 const hasActive = pStats.active > 0;
 
                 return (
-                  <div
+                  <Card
                     key={proj.id}
                     onClick={() => selectProject(proj.id)}
-                    className="kanban-card p-5 rounded-2xl bg-white border border-slate-200 hover:border-blue-500 cursor-pointer transition-all duration-200 flex flex-col justify-between space-y-4 group shadow-sm hover:shadow"
+                    className="border-border/70 bg-card/60 hover:border-primary/50 hover:bg-card/90 cursor-pointer transition-all duration-200 flex flex-col justify-between space-y-4 group p-5 shadow-sm"
                   >
                     <div className="space-y-3">
                       {/* Top Row: Name and Health Pill */}
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <h3 className="text-sm font-bold text-slate-800 group-hover:text-blue-600 transition-colors">
+                          <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
                             {proj.name}
                           </h3>
                           <a
                             href={`https://github.com/${proj.repoOwner}/${proj.repoName}`}
                             target="_blank"
                             rel="noreferrer"
-                            onClick={e => e.stopPropagation()}
-                            className="text-xs text-slate-500 font-mono flex items-center gap-1 hover:text-blue-600 mt-0.5"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-xs text-muted-foreground font-mono flex items-center gap-1 hover:text-foreground mt-0.5"
                           >
-                            <FolderGit2 className="w-3.5 h-3.5 text-slate-400" />
-                            {proj.repoOwner}/{proj.repoName}
-                            <ExternalLink className="w-3 h-3 text-slate-400" />
+                            <FolderGit2 className="size-3 text-muted-foreground" />
+                            <span>{proj.repoOwner}/{proj.repoName}</span>
+                            <ExternalLink className="size-2.5 opacity-60" />
                           </a>
                         </div>
 
                         {hasActive ? (
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#fee2e2] text-[#dc2626] border border-[#fecaca] shrink-0">
+                          <Badge variant="destructive" className="font-semibold text-[10px]">
                             {pStats.active} Active Issue{pStats.active > 1 ? 's' : ''}
-                          </span>
+                          </Badge>
                         ) : (
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#dcfce7] text-[#16a34a] border border-[#bbf7d0] shrink-0">
+                          <Badge variant="success" className="font-semibold text-[10px]">
                             Healthy
-                          </span>
+                          </Badge>
                         )}
                       </div>
 
                       {/* Integrations Badges */}
                       <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-muted/40 text-muted-foreground border border-border/40">
                           branch: {proj.defaultBranch}
                         </span>
-                        {proj.connections?.map(c => (
+                        {proj.connections?.map((c) => (
                           <span
                             key={c.id}
-                            className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-100 font-semibold"
+                            className="text-[10px] font-mono px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 font-medium"
                           >
                             {c.type === 'gemini' || c.type === 'openai' || c.type === 'anthropic' || c.type === 'gateway'
                               ? `ai-sdk:${c.type}`
@@ -300,31 +446,31 @@ export default function DashboardPage() {
                     </div>
 
                     {/* Bottom Row: Total Incidents and Link */}
-                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                      <span className="text-slate-500 font-medium">
-                        Total Incidents: <strong className="text-slate-800">{pStats.total}</strong>
+                    <div className="pt-3 border-t border-border/50 flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">
+                        Total Incidents: <strong className="text-foreground font-mono">{pStats.total}</strong>
                       </span>
-                      <span className="text-blue-600 font-bold flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
+                      <span className="text-primary font-medium flex items-center gap-0.5 group-hover:translate-x-0.5 transition-transform text-xs">
                         View Issues
-                        <ChevronRight className="w-3.5 h-3.5" />
+                        <ChevronRight className="size-3" />
                       </span>
                     </div>
-                  </div>
+                  </Card>
                 );
               })}
 
               {/* Add Project Card */}
               <Link
                 href="/wizard"
-                className="p-5 rounded-2xl border-2 border-dashed border-slate-200 hover:border-blue-400 bg-white/60 hover:bg-white flex flex-col items-center justify-center text-center space-y-2 min-h-[160px] group transition-all"
+                className="p-5 rounded-lg border border-dashed border-border/70 hover:border-primary/60 bg-card/20 hover:bg-card/50 flex flex-col items-center justify-center text-center space-y-2 min-h-[160px] group transition-all"
               >
-                <div className="w-9 h-9 rounded-full bg-slate-100 group-hover:bg-blue-50 text-slate-500 group-hover:text-blue-600 flex items-center justify-center transition-colors">
-                  <Plus className="w-5 h-5" />
+                <div className="size-8 rounded-full bg-muted/40 group-hover:bg-primary/10 text-muted-foreground group-hover:text-primary flex items-center justify-center transition-colors">
+                  <Plus className="size-4" />
                 </div>
-                <span className="text-xs font-bold text-slate-700 group-hover:text-blue-600">
+                <span className="text-xs font-semibold text-foreground group-hover:text-primary">
                   Connect Another Repository
                 </span>
-                <span className="text-[11px] text-slate-400">
+                <span className="text-[11px] text-muted-foreground">
                   Add GitHub repo, Sentry, and Telegram alerts
                 </span>
               </Link>
@@ -337,30 +483,32 @@ export default function DashboardPage() {
             ───────────────────────────────────────────────────────────── */
         <div className="space-y-6">
           {/* Breadcrumb & Project Header */}
-          <div className="pb-4 border-b border-slate-100 space-y-3">
-            <button
+          <div className="space-y-2 pb-2 border-b border-border/50">
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => selectProject(null)}
-              className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors"
+              className="h-7 text-xs text-muted-foreground hover:text-foreground gap-1 -ml-2"
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              Back to Connected Projects
-            </button>
+              <ArrowLeft className="size-3" />
+              <span>Back to Connected Projects</span>
+            </Button>
 
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
               <div>
-                <h2 className="text-xl font-bold tracking-tight text-slate-800 flex items-center gap-2">
-                  <FolderGit2 className="w-5 h-5 text-blue-600" />
-                  {selectedProject.name}
-                </h2>
-                <div className="flex items-center gap-3 text-xs text-slate-500 font-mono mt-0.5">
+                <h1 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
+                  <FolderGit2 className="size-5 text-primary" />
+                  <span>{selectedProject.name}</span>
+                </h1>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono mt-0.5">
                   <a
                     href={`https://github.com/${selectedProject.repoOwner}/${selectedProject.repoName}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="hover:text-blue-600 flex items-center gap-1"
+                    className="hover:text-foreground flex items-center gap-1"
                   >
-                    {selectedProject.repoOwner}/{selectedProject.repoName}
-                    <ExternalLink className="w-3 h-3" />
+                    <span>{selectedProject.repoOwner}/{selectedProject.repoName}</span>
+                    <ExternalLink className="size-2.5 opacity-60" />
                   </a>
                   <span>•</span>
                   <span>branch: {selectedProject.defaultBranch}</span>
@@ -369,100 +517,189 @@ export default function DashboardPage() {
 
               {/* Simulation triggers for this project */}
               <div className="flex items-center gap-2">
-                <button
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => triggerSimulation('sentry')}
                   disabled={Boolean(simulating)}
-                  className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                  className="h-8 text-xs gap-1.5 border-border/80 text-muted-foreground hover:text-foreground"
                 >
-                  <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
-                  {simulating === 'sentry' ? 'Simulating...' : 'Simulate Sentry Error'}
-                </button>
-                <button
+                  <ShieldAlert className="size-3.5 text-rose-400" />
+                  <span>{simulating === 'sentry' ? 'Ingesting...' : 'Test Sentry'}</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => triggerSimulation('actions')}
                   disabled={Boolean(simulating)}
-                  className="px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                  className="h-8 text-xs gap-1.5 border-border/80 text-muted-foreground hover:text-foreground"
                 >
-                  <Server className="w-3.5 h-3.5 text-amber-600" />
-                  {simulating === 'actions' ? 'Simulating...' : 'Simulate CI Failure'}
-                </button>
+                  <Server className="size-3.5 text-blue-400" />
+                  <span>{simulating === 'actions' ? 'Triggering...' : 'Test CI'}</span>
+                </Button>
               </div>
             </div>
           </div>
 
-          {/* Issues List for this Project */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-bold text-slate-800">
-              Active Incidents & Issues ({projectIncidents.length})
-            </h3>
+          {/* KPI Stats Grid */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Card className="border-border/70 bg-card/60">
+              <CardHeader className="p-4 pb-1">
+                <CardTitle className="text-xs font-medium text-muted-foreground">Total Incidents</CardTitle>
+              </CardHeader>
+              <CardContent className="p-4 pt-1">
+                <div className="text-2xl font-bold font-mono text-foreground">{metrics.totalIncidents}</div>
+              </CardContent>
+            </Card>
 
-            {projectIncidents.length === 0 ? (
-              <div className="kanban-card p-10 rounded-2xl bg-white border border-slate-200 text-center space-y-2">
-                <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
-                <h4 className="text-sm font-bold text-slate-800">No active incidents for this project</h4>
-                <p className="text-xs text-slate-500">
-                  All systems operational. Click &ldquo;Simulate Sentry Error&rdquo; above to test incident ingest and auto-remediation.
-                </p>
+            <Card className="border-border/70 bg-card/60">
+              <CardHeader className="p-4 pb-1">
+                <CardTitle className="text-xs font-medium text-muted-foreground">Needs Review</CardTitle>
+              </CardHeader>
+              <CardContent className="p-4 pt-1">
+                <div className="text-2xl font-bold font-mono text-amber-400">{metrics.awaitingReview}</div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/70 bg-card/60">
+              <CardHeader className="p-4 pb-1">
+                <CardTitle className="text-xs font-medium text-muted-foreground">Draft PRs</CardTitle>
+              </CardHeader>
+              <CardContent className="p-4 pt-1">
+                <div className="text-2xl font-bold font-mono text-foreground">{metrics.prsOpen}</div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/70 bg-card/60">
+              <CardHeader className="p-4 pb-1">
+                <CardTitle className="text-xs font-medium text-muted-foreground">Avg Resolution</CardTitle>
+              </CardHeader>
+              <CardContent className="p-4 pt-1">
+                <div className="text-2xl font-bold font-mono text-emerald-400">{metrics.meanTimeToResolveMinutes}m</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Incident List Table */}
+          <Card className="border-border/70 bg-card/60">
+            <div className="p-3 sm:p-4 border-b border-border/60 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="relative flex-1 max-w-xs">
+                <Search className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder="Filter incidents..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 h-8 text-xs bg-muted/20 border-border/60"
+                />
               </div>
-            ) : (
-              <div className="space-y-3">
-                {projectIncidents.map(inc => {
-                  const isCritical = inc.severity === 'critical';
-                  const isAwaiting = inc.status === 'awaiting_approval';
-                  const isPrOpen = inc.status === 'pr_open';
-                  const isResolved = inc.status === 'verified_resolved';
 
+              <div className="flex items-center gap-1 overflow-x-auto">
+                {[
+                  { key: 'ALL', label: 'All', count: filterCounts.ALL },
+                  { key: 'REVIEW', label: 'Needs Review', count: filterCounts.REVIEW },
+                  { key: 'PR_OPEN', label: 'Draft PRs', count: filterCounts.PR_OPEN },
+                  { key: 'RESOLVED', label: 'Resolved', count: filterCounts.RESOLVED },
+                  { key: 'ABSTAINED', label: 'Abstained', count: filterCounts.ABSTAINED },
+                ].map((f) => {
+                  const isSelected = activeFilter === f.key;
                   return (
-                    <div
-                      key={inc.id}
-                      className="kanban-card p-5 rounded-2xl bg-white border border-slate-200 hover:border-blue-400 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all"
+                    <button
+                      key={f.key}
+                      onClick={() => setActiveFilter(f.key)}
+                      className={`h-7 px-2.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                        isSelected
+                          ? 'bg-secondary text-foreground font-semibold shadow-sm border border-border/80'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                      }`}
                     >
-                      <div className="space-y-2 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-xs font-bold text-slate-400">{inc.id}</span>
-                          <span
-                            className={`text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full border ${
-                              isCritical
-                                ? 'bg-[#fee2e2] text-[#dc2626] border-[#fecaca]'
-                                : 'bg-[#fef3c7] text-[#d97706] border-[#fde68a]'
-                            }`}
-                          >
-                            {inc.severity}
-                          </span>
-                          <span className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                            {inc.status}
-                          </span>
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-100">
-                            {inc.source}
-                          </span>
-                        </div>
-
-                        <h4 className="text-sm font-bold text-slate-800 tracking-tight">
-                          {inc.title}
-                        </h4>
-
-                        <div className="flex flex-wrap items-center gap-4 text-xs font-mono text-slate-500">
-                          <span>Detected: {new Date(inc.detectedAt).toLocaleString()}</span>
-                          {inc.occurrences > 1 && (
-                            <span>Occurrences: {inc.occurrences}x</span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3 shrink-0">
-                        <Link
-                          href={`/incidents/${inc.id}`}
-                          className="px-4 py-2 bg-[#1d61f2] hover:bg-[#1554d8] text-white rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
-                        >
-                          Investigate & Fix
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </Link>
-                      </div>
-                    </div>
+                      <span>{f.label}</span>
+                      <span className="text-[10px] font-mono text-muted-foreground">({f.count})</span>
+                    </button>
                   );
                 })}
               </div>
-            )}
-          </div>
+            </div>
+
+            <CardContent className="p-0">
+              {loading ? (
+                <div className="py-16 text-center text-xs text-muted-foreground font-mono">
+                  Loading incidents...
+                </div>
+              ) : filteredIncidents.length === 0 ? (
+                <div className="py-14 text-center space-y-1">
+                  <p className="text-xs font-medium text-foreground">No incidents found</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    No active issues recorded for {selectedProject.name}. Use Test Sentry or Test CI above.
+                  </p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-border/60 hover:bg-transparent">
+                      <TableHead className="w-[100px]">ID</TableHead>
+                      <TableHead className="min-w-[280px]">Summary</TableHead>
+                      <TableHead className="w-[120px]">Source</TableHead>
+                      <TableHead className="w-[140px]">Environment</TableHead>
+                      <TableHead className="w-[140px]">Status</TableHead>
+                      <TableHead className="w-[90px] text-right">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredIncidents.map((inc) => (
+                      <TableRow key={inc.id} className="group border-border/50 hover:bg-muted/20">
+                        <TableCell className="font-mono text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-semibold text-foreground">{inc.id}</span>
+                            {getSeverityBadge(inc.severity)}
+                          </div>
+                        </TableCell>
+
+                        <TableCell>
+                          <Link
+                            href={`/incidents/${inc.id}`}
+                            className="font-medium text-xs text-foreground hover:text-primary transition-colors line-clamp-1 block"
+                          >
+                            {inc.title}
+                          </Link>
+                        </TableCell>
+
+                        <TableCell className="text-xs text-muted-foreground font-mono">
+                          <span>{inc.source}</span>
+                          {inc.occurrences > 1 && (
+                            <span className="ml-1 text-[10px] text-muted-foreground/70 font-sans">
+                              ({inc.occurrences}x)
+                            </span>
+                          )}
+                        </TableCell>
+
+                        <TableCell className="text-xs text-muted-foreground">
+                          <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                            <span>{inc.environment || 'production'}</span>
+                            <span className="text-muted-foreground/40">•</span>
+                            <span>{timeAgo(inc.detectedAt)}</span>
+                          </div>
+                        </TableCell>
+
+                        <TableCell>
+                          {getStatusBadge(inc.status)}
+                        </TableCell>
+
+                        <TableCell className="text-right">
+                          <Button asChild size="sm" variant={inc.status === 'awaiting_approval' ? "default" : "ghost"} className="h-7 px-2.5 text-xs">
+                            <Link href={`/incidents/${inc.id}`}>
+                              <span>{inc.status === 'awaiting_approval' ? 'Review' : 'View'}</span>
+                              <ChevronRight className="size-3 ml-0.5" />
+                            </Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
         </div>
       )}
     </div>
