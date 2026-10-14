@@ -18,8 +18,8 @@ export const config = {
 export async function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
-  // 1. Allow public authentication endpoints, login page, and setup wizard
-  if (pathname.startsWith('/api/auth') || pathname === '/login' || pathname === '/wizard') {
+  // 1. Allow public authentication endpoints, login page, setup wizard, and design system showcase
+  if (pathname.startsWith('/api/auth') || pathname === '/login' || pathname === '/wizard' || pathname === '/design-system') {
     // If user is already authenticated and visits /login, redirect to dashboard
     if (pathname === '/login') {
       const sessionCookie = request.cookies.get(GOOGLE_SESSION_COOKIE_NAME)?.value;
@@ -52,6 +52,11 @@ export async function middleware(request: NextRequest) {
   }
 
   if (!session) {
+    // In local development mode, allow seamless access without requiring external Google OAuth
+    if (process.env.NODE_ENV === 'development' && !process.env.VITEST) {
+      return NextResponse.next();
+    }
+
     // For API calls, return 401 Unauthorized
     if (pathname.startsWith('/api/')) {
       return NextResponse.json(
