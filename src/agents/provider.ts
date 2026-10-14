@@ -126,7 +126,10 @@ export async function getLanguageModel(options: ModelResolutionOptions = {}): Pr
     case 'gemini':
     default: {
       const apiKey = keyStr || process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
-      const modelName = modelStr || process.env.GEMINI_MODEL || 'gemini-flash-latest';
+      let modelName = modelStr || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+      if (modelName === 'gemini-2.5-flash' || modelName === 'gemini-2.5-pro') {
+        modelName = 'gemini-3.8-flash';
+      }
       if (!apiKey) {
         throw new Error('Gemini API key not configured. Set GEMINI_API_KEY in .env or configure in project settings.');
       }

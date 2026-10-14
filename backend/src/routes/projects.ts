@@ -18,9 +18,14 @@ import {
 import { desc, eq, and, inArray } from 'drizzle-orm';
 import crypto from 'crypto';
 import { decodeSessionCookie, GITHUB_SESSION_COOKIE_NAME } from '@/core/githubOAuth';
+import { sandboxRegistry } from '@/adapters/sandboxes/registry';
 import { logger } from '@/core/logger';
 
 export const projectsRouter = Router();
+
+projectsRouter.get('/sandboxes', async (_req: Request, res: Response) => {
+  return res.json({ sandboxes: sandboxRegistry.list() });
+});
 
 projectsRouter.get('/', async (_req: Request, res: Response) => {
   try {
@@ -52,6 +57,7 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
       repoOwner,
       repoName,
       defaultBranch = 'main',
+      sandboxProvider = 'local-docker',
       githubToken,
       aiProvider = 'gemini',
       aiModel,
@@ -70,6 +76,9 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
       });
     }
 
+    const allowedSandboxes = ['local-docker', 'e2b', 'modal', 'fake'];
+    const chosenSandbox = allowedSandboxes.includes(sandboxProvider) ? sandboxProvider : 'local-docker';
+
     const now = new Date().toISOString();
 
     // Check if project already exists
@@ -83,6 +92,7 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
       await db.update(projects).set({
         name,
         defaultBranch,
+        sandboxProvider: chosenSandbox,
         updatedAt: now
       }).where(eq(projects.id, projectId));
     } else {
@@ -93,16 +103,17 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
         repoOwner,
         repoName,
         defaultBranch,
-        sandboxProvider: 'local-docker',
+        sandboxProvider: chosenSandbox,
         createdAt: now,
         updatedAt: now
       });
 
       // 2. Initialize Policy
+      const autonomyLevel = body.canDraftPR === false ? 'suggest' : (body.autonomyLevel || 'draft_pr');
       await db.insert(policies).values({
         id: `POL-${projectId}`,
         projectId,
-        autonomyLevel: 'draft_pr',
+        autonomyLevel,
         protectedPaths: '["migrations/**", "infra/**", ".github/**", "security/**", ".env"]',
         maxChangedFiles: 3,
         maxChangedLines: 60,
@@ -207,56 +218,73 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
   }
 });
 
-projectsRouter.patch('/', async (req: Request, res: Response) => {
+const handlePatchProject = async (req: Request, res: Response) => {
   try {
-    const { projectId, aiProvider, aiModel, aiApiKey } = req.body;
+    const id = req.params.id || req.body?.projectId;
+    const { sandboxProvider, name, defaultBranch, aiProvider, aiModel, aiApiKey } = req.body || {};
 
-    if (!projectId) {
+    if (!id) {
       return res.status(400).json({ error: 'Project ID is required' });
     }
 
-    const project = await db.select().from(projects).where(eq(projects.id, projectId)).get();
+    const project = await db.select().from(projects).where(eq(projects.id, id)).get();
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
 
     const now = new Date().toISOString();
+    const updates: Partial<typeof projects.$inferInsert> = {
+      updatedAt: now
+    };
+
+    if (sandboxProvider !== undefined) {
+      const allowed = ['local-docker', 'e2b', 'modal', 'fake'];
+      if (!allowed.includes(sandboxProvider)) {
+        return res.status(400).json({ error: `Invalid sandbox provider. Must be one of: ${allowed.join(', ')}` });
+      }
+      updates.sandboxProvider = sandboxProvider;
+    }
+
+    if (name) updates.name = name;
+    if (defaultBranch) updates.defaultBranch = defaultBranch;
+
+    await db.update(projects).set(updates).where(eq(projects.id, id));
 
     if (aiProvider || aiModel || aiApiKey) {
       const chosenProvider = aiProvider || 'gemini';
-      const existingConns = await db.select().from(connections).where(eq(connections.projectId, projectId));
+      const existingConns = await db.select().from(connections).where(eq(connections.projectId, id));
       const existingAiConn = existingConns.find(c => ['gemini', 'openai', 'anthropic', 'gateway', 'ai'].includes(c.type));
 
       const effectiveKey = aiApiKey || existingAiConn?.encryptedSecret || process.env.GEMINI_API_KEY || 'configured_in_env';
 
       await db.delete(connections).where(
-        and(eq(connections.projectId, projectId), inArray(connections.type, ['gemini', 'openai', 'anthropic', 'gateway', 'ai']))
+        and(eq(connections.projectId, id), inArray(connections.type, ['gemini', 'openai', 'anthropic', 'gateway', 'ai']))
       );
 
       await db.insert(connections).values({
         id: `conn_${chosenProvider}_${Date.now().toString(36)}`,
-        projectId,
+        projectId: id,
         type: chosenProvider,
         encryptedSecret: effectiveKey,
         metadata: JSON.stringify({
           provider: chosenProvider,
-          model: aiModel || (chosenProvider === 'openai' ? 'gpt-4o-mini' : chosenProvider === 'anthropic' ? 'claude-3-5-sonnet-20241022' : 'gemini-2.5-flash')
+          model: aiModel || (chosenProvider === 'openai' ? 'gpt-4o-mini' : chosenProvider === 'anthropic' ? 'claude-3-5-sonnet-20241022' : 'gemini-3.8-flash')
         }),
         createdAt: now
       });
     }
 
-    await db.update(projects).set({ updatedAt: now }).where(eq(projects.id, projectId));
-
-    return res.json({
-      success: true,
-      message: 'AI model configuration updated successfully.'
-    });
+    const updated = await db.select().from(projects).where(eq(projects.id, id)).get();
+    logger.info({ projectId: id, sandboxProvider: updated?.sandboxProvider }, '[Projects] Project updated successfully');
+    return res.json({ success: true, project: updated });
   } catch (err: any) {
-    logger.error({ error: err.message }, '[Projects] PATCH failed');
+    logger.error({ error: err.message }, '[Projects] Update failed');
     return res.status(500).json({ error: err.message });
   }
-});
+};
+
+projectsRouter.patch('/:id', handlePatchProject);
+projectsRouter.patch('/', handlePatchProject);
 
 projectsRouter.delete('/:id', async (req: Request, res: Response) => {
   try {

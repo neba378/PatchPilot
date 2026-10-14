@@ -274,6 +274,116 @@ authRouter.get('/github/repos', async (req: Request, res: Response) => {
   }
 });
 
+authRouter.post('/github/token', async (req: Request, res: Response) => {
+  try {
+    const { token } = req.body || {};
+    if (!token) {
+      return res.status(400).json({ error: 'GitHub token is required.' });
+    }
+
+    const trimmedToken = token.trim();
+    const user = await fetchGitHubUser(trimmedToken);
+
+    const session: GitHubUserSession = {
+      token: trimmedToken,
+      user,
+      connectedAt: new Date().toISOString(),
+      source: 'oauth'
+    };
+
+    const encoded = encodeSessionCookie(session);
+
+    res.cookie(GITHUB_SESSION_COOKIE_NAME, encoded, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 7 * 24 * 3600 * 1000
+    });
+
+    process.env.GITHUB_TOKEN = trimmedToken;
+    logger.info({ user: user.login }, '[GitHub Token] Successfully connected user via UI token');
+
+    return res.json({ success: true, user });
+  } catch (err: any) {
+    logger.error({ error: err.message }, '[GitHub Token] Verification failed');
+    return res.status(400).json({ error: err.message || 'Failed to authenticate token with GitHub' });
+  }
+});
+
+authRouter.post('/github/check-permissions', async (req: Request, res: Response) => {
+  try {
+    const { repo } = req.body || {};
+    if (!repo) {
+      return res.status(400).json({ error: 'Repository name (owner/repo) is required.' });
+    }
+
+    const rawCookie = req.cookies?.[GITHUB_SESSION_COOKIE_NAME];
+    const session = decodeSessionCookie(rawCookie);
+    const token = session?.token || (process.env.GITHUB_TOKEN !== 'mock' ? process.env.GITHUB_TOKEN : undefined);
+
+    if (!token) {
+      return res.status(401).json({ error: 'Not authenticated with GitHub.' });
+    }
+
+    const { Octokit } = await import('@octokit/rest');
+    const octokit = new Octokit({ auth: token });
+    const [owner, repoName] = repo.split('/');
+
+    let canRead = false;
+    let canWrite = false;
+    let defaultBranch = 'main';
+    let errorMessage: string | null = null;
+
+    try {
+      const repoInfo = await octokit.rest.repos.get({ owner, repo: repoName });
+      canRead = true;
+      defaultBranch = repoInfo.data.default_branch || 'main';
+    } catch (e: any) {
+      return res.json({ canRead: false, canWrite: false, error: `Cannot read repo: ${e.message}` });
+    }
+
+    // Test write permission by testing ref creation check
+    try {
+      const testRefName = `patchpilot-perm-check-${Date.now().toString(36)}`;
+      const defRef = await octokit.rest.git.getRef({ owner, repo: repoName, ref: `heads/${defaultBranch}` });
+      const sha = defRef.data.object.sha;
+
+      await octokit.rest.git.createRef({
+        owner,
+        repo: repoName,
+        ref: `refs/heads/${testRefName}`,
+        sha
+      });
+
+      // Cleanup test ref immediately
+      try {
+        await octokit.rest.git.deleteRef({
+          owner,
+          repo: repoName,
+          ref: `heads/${testRefName}`
+        });
+      } catch {}
+
+      canWrite = true;
+    } catch (err: any) {
+      errorMessage = err.message || 'Write permission denied by GitHub';
+      logger.info({ err: err.message }, '[GitHub Permissions Check] Write permission test failed');
+      canWrite = false;
+    }
+
+    return res.json({
+      canRead,
+      canWrite,
+      defaultBranch,
+      canDraftPR: canWrite,
+      error: errorMessage
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 authRouter.post('/github/config', async (req: Request, res: Response) => {
   try {
     const { clientId, clientSecret } = req.body || {};

@@ -4,7 +4,7 @@ import { sandboxRegistry } from '../adapters/sandboxes/registry';
 import { gitHubAdapter, getGitHubAdapterForProject } from '../adapters/repohosts/github';
 import { generateFixEdits } from '../agents/fixer';
 import { db } from '../db';
-import { fixAttempts, pullRequests, incidents } from '../db/schema';
+import { fixAttempts, pullRequests, incidents, projects } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import { logger } from './logger';
 import { telegramAdapter } from '../adapters/channels/telegram';
@@ -99,11 +99,27 @@ export async function executeSandboxFix(
   await db.update(incidents).set({ status: 'fixing' }).where(eq(incidents.id, incident.id));
   await telegramAdapter.sendProgress(incident.id, 'Sandbox Provisioning', 'Provisioning isolated sandbox environment');
 
-  const repo = process.env.TARGET_GITHUB_REPO || incident.repo || 'neba378/test';
-  const commitRef = incident.commitSha || 'main';
+  let repo = process.env.TARGET_GITHUB_REPO || incident.repo || 'neba378/test';
+  let commitRef = incident.commitSha || 'main';
+  let providerType = process.env.SANDBOX_PROVIDER || 'local-docker';
+
+  if (incident.projectId) {
+    const proj = await db.select().from(projects).where(eq(projects.id, incident.projectId)).get();
+    if (proj) {
+      if (proj.repoOwner && proj.repoName) {
+        repo = `${proj.repoOwner}/${proj.repoName}`;
+      }
+      if (proj.defaultBranch && (!incident.commitSha || incident.commitSha === 'main' || incident.commitSha === 'a7b31e9')) {
+        commitRef = proj.defaultBranch;
+      }
+      if (proj.sandboxProvider) {
+        providerType = proj.sandboxProvider;
+      }
+    }
+  }
   const repoHost = await getGitHubAdapterForProject(incident.projectId);
-  const providerType = process.env.SANDBOX_PROVIDER || 'fake';
   const provider = sandboxRegistry.get(providerType);
+  logger.info({ incidentId: incident.id, repo, commitRef, providerType, sandboxProvider: provider.id }, '[SandboxFixPipeline] Using sandbox provider');
 
   addLog(`📦 Provisioning isolated sandbox environment (provider: ${providerType})...`);
 
@@ -159,15 +175,20 @@ export async function executeSandboxFix(
     // 4. Synthesize fix edits
     addLog('🧠 Step 2/6: Synthesizing fix edits and authoring regression test with AI...');
     let targetFile = investigation.affectedFiles[0] || 'src/paymentController.ts';
-    if (!targetFile.startsWith('src/')) {
-      targetFile = `src/${targetFile}`;
+    if (!files[targetFile]) {
+      const baseName = targetFile.split('/').pop();
+      if (baseName) {
+        const matchingKey = Object.keys(files).find(p => p.endsWith(baseName));
+        if (matchingKey) {
+          targetFile = matchingKey;
+        }
+      }
     }
 
     let originalContent = '';
     try {
       originalContent = await sandbox.readFile(targetFile);
     } catch {
-      // Try alt paths
       try {
         originalContent = await sandbox.readFile('src/paymentController.ts');
         targetFile = 'src/paymentController.ts';
@@ -243,8 +264,8 @@ export async function executeSandboxFix(
 
     testSuitePassed = postPatchPassed;
 
-    // 8. Generate unified Git diff dynamically
-    diffResult = generateSimpleDiff(targetFile, originalContent, patchedContent);
+    const gitDiffExec = await sandbox.exec('git diff');
+    diffResult = gitDiffExec.stdout?.trim() || generateSimpleDiff(targetFile, originalContent, patchedContent);
     addLog('📊 Unified git diff calculated successfully.');
 
     // 9. Open DRAFT PR with full proof attached

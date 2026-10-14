@@ -20,9 +20,15 @@ export class LocalDockerSandbox implements Sandbox {
   async exec(command: string, opts?: { cwd?: string; env?: Record<string, string> }): Promise<ExecResult> {
     try {
       const targetDir = opts?.cwd || this.workDir;
+      const binDir = path.join(this.workDir, 'node_modules', '.bin');
+      const env = {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH || ''}`,
+        ...opts?.env
+      };
       const { stdout, stderr } = await execAsync(command, {
         cwd: targetDir,
-        env: { ...process.env, ...opts?.env },
+        env,
         timeout: 60000
       });
       return { exitCode: 0, stdout, stderr };
@@ -72,6 +78,39 @@ export class LocalDockerSandboxProvider implements SandboxProvider {
       for (const [p, c] of Object.entries(opts.files)) {
         await sbx.writeFile(p, c);
       }
+    }
+
+    // Link demo node_modules if present so tests and runner execute cleanly
+    const demoModules = path.join(process.cwd(), 'fixtures', 'demo-app', 'node_modules');
+    if (fs.existsSync(demoModules)) {
+      try {
+        fs.symlinkSync(demoModules, path.join(workDir, 'node_modules'), 'junction');
+      } catch (err: any) {
+        logger.warn({ err: err.message }, '[LocalDockerSandbox] Failed to symlink demo node_modules');
+      }
+    }
+
+    // Ensure tsconfig.json exists for TypeScript compilation checks
+    const tsconfigPath = path.join(workDir, 'tsconfig.json');
+    if (!fs.existsSync(tsconfigPath)) {
+      const basicTsConfig = JSON.stringify({
+        compilerOptions: {
+          target: "ES2022",
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          esModuleInterop: true,
+          strict: false,
+          skipLibCheck: true
+        }
+      }, null, 2);
+      fs.writeFileSync(tsconfigPath, basicTsConfig, 'utf-8');
+    }
+
+    // Initialize git repo in sandbox to calculate real diffs
+    try {
+      await sbx.exec('git init && git config user.name "PatchPilot" && git config user.email "patchpilot@local" && git add . && git commit -m "initial"');
+    } catch (err: any) {
+      logger.warn({ err: err.message }, '[LocalDockerSandbox] Git initialization in sandbox failed');
     }
 
     return sbx;
