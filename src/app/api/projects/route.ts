@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { projects, connections, policies } from '@/db/schema';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, and, inArray } from 'drizzle-orm';
 import crypto from 'crypto';
 import { decodeSessionCookie, GITHUB_SESSION_COOKIE_NAME } from '@/core/githubOAuth';
 
@@ -53,34 +53,48 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const projectId = `proj_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now().toString(36)}`;
     const now = new Date().toISOString();
 
-    // 1. Create Project
-    await db.insert(projects).values({
-      id: projectId,
-      name,
-      repoOwner,
-      repoName,
-      defaultBranch,
-      sandboxProvider: 'local-docker',
-      createdAt: now,
-      updatedAt: now
-    });
+    // Check if project already exists
+    const existingProject = body.projectId
+      ? await db.select().from(projects).where(eq(projects.id, body.projectId)).get()
+      : await db.select().from(projects).where(and(eq(projects.repoOwner, repoOwner), eq(projects.repoName, repoName))).get();
 
-    // 2. Initialize Policy
-    await db.insert(policies).values({
-      id: `POL-${projectId}`,
-      projectId,
-      autonomyLevel: 'draft_pr',
-      protectedPaths: '["migrations/**", "infra/**", ".github/**", "security/**", ".env"]',
-      maxChangedFiles: 3,
-      maxChangedLines: 60,
-      modelCallBudget: 10,
-      sandboxTimeoutSeconds: 180,
-      maxRetries: 2,
-      circuitBreakerTripped: false
-    });
+    const projectId = existingProject ? existingProject.id : `proj_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now().toString(36)}`;
+
+    if (existingProject) {
+      await db.update(projects).set({
+        name,
+        defaultBranch,
+        updatedAt: now
+      }).where(eq(projects.id, projectId));
+    } else {
+      // 1. Create Project
+      await db.insert(projects).values({
+        id: projectId,
+        name,
+        repoOwner,
+        repoName,
+        defaultBranch,
+        sandboxProvider: 'local-docker',
+        createdAt: now,
+        updatedAt: now
+      });
+
+      // 2. Initialize Policy
+      await db.insert(policies).values({
+        id: `POL-${projectId}`,
+        projectId,
+        autonomyLevel: 'draft_pr',
+        protectedPaths: '["migrations/**", "infra/**", ".github/**", "security/**", ".env"]',
+        maxChangedFiles: 3,
+        maxChangedLines: 60,
+        modelCallBudget: 10,
+        sandboxTimeoutSeconds: 180,
+        maxRetries: 2,
+        circuitBreakerTripped: false
+      });
+    }
 
     // 3. Save Connections (encrypted secrets)
     const connList: any[] = [];
@@ -90,6 +104,9 @@ export async function POST(req: NextRequest) {
     const effectiveGithubToken = githubToken || session?.token || (process.env.GITHUB_TOKEN !== 'mock' ? process.env.GITHUB_TOKEN : undefined);
 
     if (effectiveGithubToken) {
+      if (existingProject) {
+        await db.delete(connections).where(and(eq(connections.projectId, projectId), eq(connections.type, 'github')));
+      }
       connList.push({
         id: `conn_gh_${Date.now().toString(36)}`,
         projectId,
@@ -105,23 +122,31 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const effectiveAiKey = aiApiKey || geminiApiKey;
-    if (effectiveAiKey) {
+    const effectiveAiKey = aiApiKey || geminiApiKey || (existingProject ? undefined : process.env.GEMINI_API_KEY);
+    if (effectiveAiKey || aiModel) {
       const chosenProvider = aiProvider || 'gemini';
+      if (existingProject) {
+        await db.delete(connections).where(
+          and(eq(connections.projectId, projectId), inArray(connections.type, ['gemini', 'openai', 'anthropic', 'gateway', 'ai']))
+        );
+      }
       connList.push({
         id: `conn_${chosenProvider}_${Date.now().toString(36)}`,
         projectId,
         type: chosenProvider,
-        encryptedSecret: effectiveAiKey,
+        encryptedSecret: effectiveAiKey || 'configured_in_env',
         metadata: JSON.stringify({
           provider: chosenProvider,
-          model: aiModel || (chosenProvider === 'openai' ? 'gpt-4o-mini' : chosenProvider === 'anthropic' ? 'claude-3-5-sonnet-20241022' : 'gemini-flash-latest')
+          model: aiModel || (chosenProvider === 'openai' ? 'gpt-4o-mini' : chosenProvider === 'anthropic' ? 'claude-3-5-sonnet-20241022' : 'gemini-2.5-flash')
         }),
         createdAt: now
       });
     }
 
     if (sentrySecret || sentryOrg) {
+      if (existingProject) {
+        await db.delete(connections).where(and(eq(connections.projectId, projectId), eq(connections.type, 'sentry')));
+      }
       connList.push({
         id: `conn_sentry_${Date.now().toString(36)}`,
         projectId,
@@ -133,6 +158,9 @@ export async function POST(req: NextRequest) {
     }
 
     if (telegramToken) {
+      if (existingProject) {
+        await db.delete(connections).where(and(eq(connections.projectId, projectId), eq(connections.type, 'telegram')));
+      }
       connList.push({
         id: `conn_tg_${Date.now().toString(36)}`,
         projectId,
@@ -161,3 +189,55 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { projectId, aiProvider, aiModel, aiApiKey } = body;
+
+    if (!projectId) {
+      return NextResponse.json({ error: 'Project ID is required' }, { status: 400 });
+    }
+
+    const project = await db.select().from(projects).where(eq(projects.id, projectId)).get();
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    const now = new Date().toISOString();
+
+    if (aiProvider || aiModel || aiApiKey) {
+      const chosenProvider = aiProvider || 'gemini';
+      const existingConns = await db.select().from(connections).where(eq(connections.projectId, projectId));
+      const existingAiConn = existingConns.find(c => ['gemini', 'openai', 'anthropic', 'gateway', 'ai'].includes(c.type));
+
+      const effectiveKey = aiApiKey || existingAiConn?.encryptedSecret || process.env.GEMINI_API_KEY || 'configured_in_env';
+
+      await db.delete(connections).where(
+        and(eq(connections.projectId, projectId), inArray(connections.type, ['gemini', 'openai', 'anthropic', 'gateway', 'ai']))
+      );
+
+      await db.insert(connections).values({
+        id: `conn_${chosenProvider}_${Date.now().toString(36)}`,
+        projectId,
+        type: chosenProvider,
+        encryptedSecret: effectiveKey,
+        metadata: JSON.stringify({
+          provider: chosenProvider,
+          model: aiModel || (chosenProvider === 'openai' ? 'gpt-4o-mini' : chosenProvider === 'anthropic' ? 'claude-3-5-sonnet-20241022' : 'gemini-2.5-flash')
+        }),
+        createdAt: now
+      });
+    }
+
+    await db.update(projects).set({ updatedAt: now }).where(eq(projects.id, projectId));
+
+    return NextResponse.json({
+      success: true,
+      message: 'AI model configuration updated successfully.'
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+

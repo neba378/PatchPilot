@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { incidents, investigations, fixAttempts, pullRequests, postmortems } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -13,9 +13,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: 'Incident not found' }, { status: 404 });
     }
 
-    const investigation = await db.select().from(investigations).where(eq(investigations.incidentId, id)).get();
-    const fixAttempt = await db.select().from(fixAttempts).where(eq(fixAttempts.incidentId, id)).get();
-    const pr = await db.select().from(pullRequests).where(eq(pullRequests.incidentId, id)).get();
+    const investigation = await db.select().from(investigations).where(eq(investigations.incidentId, id)).orderBy(desc(investigations.createdAt)).limit(1).get() || await db.select().from(investigations).where(eq(investigations.incidentId, id)).get();
+    const fixAttempt = await db.select().from(fixAttempts).where(eq(fixAttempts.incidentId, id)).orderBy(desc(fixAttempts.createdAt)).limit(1).get() || await db.select().from(fixAttempts).where(eq(fixAttempts.incidentId, id)).get();
+    const pr = await db.select().from(pullRequests).where(eq(pullRequests.incidentId, id)).orderBy(desc(pullRequests.createdAt)).limit(1).get() || await db.select().from(pullRequests).where(eq(pullRequests.incidentId, id)).get();
     const postmortem = await db.select().from(postmortems).where(eq(postmortems.incidentId, id)).get();
 
     return NextResponse.json({

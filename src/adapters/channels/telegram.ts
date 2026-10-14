@@ -159,8 +159,26 @@ Tap *Accept & Patch* to reproduce in sandbox, synthesize fix, and generate draft
   /**
    * Sends real-time progress update to thread.
    */
-  public async sendProgress(incidentId: string, stage: string, detail: string): Promise<void> {
+  public async sendProgress(incidentId: string, stage: string, detail: string, chatId?: string): Promise<void> {
     logger.info({ incidentId, stage, detail }, `[TelegramProgress] ⚡ ${stage}: ${detail}`);
+    const botToken = this.botToken || process.env.TELEGRAM_BOT_TOKEN;
+    const targetChatId = chatId || this.defaultChatId || process.env.TELEGRAM_CHAT_ID;
+
+    if (botToken && targetChatId) {
+      try {
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: targetChatId,
+            text: `⚡ *PatchPilot Sandbox Progress* [\`${incidentId}\`]\n• *${stage}*: ${detail}`,
+            parse_mode: 'Markdown'
+          })
+        });
+      } catch (err: any) {
+        logger.warn({ error: err.message }, '[TelegramAdapter] Failed to send progress update');
+      }
+    }
   }
 }
 

@@ -24,7 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <p>PatchPilot © 2026 Nebiyu Musbah — AI Automation Assignment for Brain3 AI</p>
                 <div className="flex items-center gap-4 text-[11px]">
                   <span className="text-muted-foreground">Hard Invariant: Human-in-the-Loop Enforced</span>
-                  <span className="text-primary font-mono font-medium">Gemini 2.5 Flash Free Tier</span>
+                  <span className="text-primary font-mono font-medium">Multi-Model AI Engine (Gemini · OpenAI · Claude)</span>
                 </div>
               </div>
             </footer>

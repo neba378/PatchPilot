@@ -22,7 +22,11 @@ coverage
 .nyc_output
 
 # Dependency directories
+node_modules
 node_modules/
+
+# TypeScript build info
+*.tsbuildinfo
 
 # Next.js build
 .next/
@@ -45,5 +49,5 @@ data/
 
 # Sandboxes & eval outputs
 eval/results/*.json
-sandboxes/
-temp/
+/sandboxes/
+/temp/
